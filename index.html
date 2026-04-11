@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="theme-color" content="#0d0d0f"/>
+<meta name="description" content="SMS dashboard for Twilio conversations"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Messages"/>
+<title>Messages</title>
+<link rel="manifest" href="/manifest.webmanifest"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png"/>
+<link rel="apple-touch-icon" href="/icons/icon-192.png"/>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d0f; height: 100vh; overflow: hidden; display: flex; color: #fff; }
+
+/* ── LOADING ── */
+#loading-overlay { position: fixed; inset: 0; background: #0d0d0f; z-index: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+#loading-overlay.hidden { display: none; }
+.spinner { width: 36px; height: 36px; border: 3px solid #2c2c2e; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { color: #8e8e93; font-size: 14px; }
+
+/* ── AUTH ── */
+#auth-screen { position: fixed; inset: 0; background: #0d0d0f; z-index: 400; display: flex; align-items: center; justify-content: center; }
+#auth-screen.hidden { display: none; }
+.auth-box { background: #1c1c1e; border-radius: 20px; padding: 2rem; width: 100%; max-width: 380px; box-shadow: 0 30px 80px rgba(0,0,0,0.6); }
+.auth-box h2 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.auth-box p { color: #8e8e93; font-size: 13px; margin-bottom: 1.5rem; }
+.auth-tabs { display: flex; gap: 0; margin-bottom: 1.5rem; background: #2c2c2e; border-radius: 10px; padding: 3px; }
+.auth-tab { flex: 1; padding: 8px; text-align: center; font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 8px; color: #8e8e93; border: none; background: none; transition: all 0.15s; }
+.auth-tab.active { background: #3a3a3c; color: #fff; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 11px; font-weight: 600; color: #8e8e93; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.field input { width: 100%; padding: 11px 13px; background: #2c2c2e; border: none; border-radius: 10px; color: #fff; font-size: 14px; outline: none; transition: background 0.15s; }
+.field input::placeholder { color: #48484a; }
+.field input:focus { background: #3a3a3c; }
+.btn-primary { width: 100%; padding: 12px; background: #2563eb; color: #fff; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 6px; transition: background 0.15s; }
+.btn-primary:hover { background: #1d4ed8; }
+.auth-err { color: #ff453a; font-size: 12px; text-align: center; margin-top: 8px; min-height: 16px; }
+
+/* ── MODELS SCREEN ── */
+#models-screen { position: fixed; inset: 0; background: #0d0d0f; z-index: 300; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 0; }
+#models-screen.hidden { display: none; }
+.models-wrap { width: 100%; max-width: 480px; height: 100vh; display: flex; flex-direction: column; }
+.models-header { padding: 20px 20px 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #2c2c2e; }
+.models-header h1 { font-size: 20px; font-weight: 700; }
+.models-header-right { display: flex; align-items: center; gap: 10px; }
+.user-badge { font-size: 12px; color: #8e8e93; }
+.btn-signout { background: none; border: 1px solid #3a3a3c; color: #8e8e93; border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+.btn-signout:hover { color: #fff; border-color: #636366; }
+.models-list { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.model-card { background: #1c1c1e; border-radius: 14px; padding: 16px; display: flex; align-items: center; gap: 14px; cursor: pointer; transition: background 0.15s; border: 1px solid #2c2c2e; }
+.model-card:hover { background: #252527; border-color: #3a3a3c; }
+.model-avatar { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; flex-shrink: 0; }
+.model-info { flex: 1; min-width: 0; }
+.model-name { font-size: 16px; font-weight: 600; }
+.model-num { font-size: 13px; color: #8e8e93; margin-top: 2px; }
+.model-actions { display: flex; gap: 6px; }
+.btn-icon { background: #2c2c2e; border: none; color: #8e8e93; border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+.btn-icon:hover { background: #3a3a3c; color: #fff; }
+.btn-icon.danger:hover { background: #ff453a22; color: #ff453a; }
+.models-footer { padding: 12px; border-top: 1px solid #2c2c2e; }
+.btn-add-model { width: 100%; padding: 13px; background: #2563eb22; color: #2563eb; border: 1px dashed #2563eb55; border-radius: 12px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.btn-add-model:hover { background: #2563eb33; }
+.empty-models { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #48484a; }
+.empty-models .icon { font-size: 48px; }
+
+/* ── MODAL ── */
+#modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 600; align-items: center; justify-content: center; }
+#modal-overlay.open { display: flex; }
+.modal-box { background: #1c1c1e; border-radius: 18px; padding: 1.5rem; width: 100%; max-width: 380px; box-shadow: 0 30px 80px rgba(0,0,0,0.6); }
+.modal-box h3 { font-size: 17px; font-weight: 600; margin-bottom: 1rem; }
+.modal-actions { display: flex; gap: 8px; margin-top: 12px; }
+.btn-sec { flex:1; padding: 10px; background: #2c2c2e; color: #fff; border: none; border-radius: 10px; font-size: 14px; cursor: pointer; }
+.btn-sec:hover { background: #3a3a3c; }
+
+/* ── CHAT APP ── */
+#app { display: none; width: 100%; height: 100vh; }
+#app.visible { display: flex; }
+
+/* SIDEBAR */
+#sidebar { width: 300px; min-width: 300px; background: #1c1c1e; border-right: 1px solid #2c2c2e; display: flex; flex-direction: column; height: 100vh; }
+.sidebar-header { padding: 14px 14px 10px; border-bottom: 1px solid #2c2c2e; }
+.sidebar-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.model-switcher { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 10px; background: #2c2c2e; border-radius: 10px; flex: 1; min-width: 0; transition: background 0.15s; border: none; color: #fff; }
+.model-switcher:hover { background: #3a3a3c; }
+.model-switcher-avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.model-switcher-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.model-switcher-arrow { font-size: 10px; color: #636366; margin-left: auto; flex-shrink: 0; }
+.sidebar-icons { display: flex; gap: 4px; }
+.search-wrap { margin-bottom: 0; }
+.search-wrap input { width: 100%; padding: 8px 12px; background: #2c2c2e; border: none; border-radius: 10px; color: #fff; font-size: 14px; outline: none; }
+.search-wrap input::placeholder { color: #48484a; }
+#chat-list { flex: 1; overflow-y: auto; }
+#chat-list::-webkit-scrollbar { width: 4px; }
+#chat-list::-webkit-scrollbar-thumb { background: #3a3a3c; border-radius: 4px; }
+.chat-item { display: flex; align-items: center; gap: 11px; padding: 11px 14px; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid #222224; position: relative; }
+.chat-item:hover { background: #252527; }
+.chat-item.active { background: #2c2c2e; }
+.chat-avatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; }
+.chat-item-info { flex: 1; min-width: 0; }
+.chat-item-top { display: flex; justify-content: space-between; align-items: baseline; }
+.chat-item-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.chat-item-time { font-size: 11px; color: #636366; flex-shrink: 0; }
+.chat-item-preview { font-size: 12px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.unread-badge { background: #2563eb; color: #fff; font-size: 11px; font-weight: 700; border-radius: 10px; padding: 2px 7px; min-width: 20px; text-align: center; flex-shrink: 0; }
+.chat-item-delete { display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #ff453a; border: none; color: #fff; border-radius: 7px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
+.chat-item:hover .chat-item-delete { display: block; }
+.chat-item:hover .unread-badge { display: none; }
+.chat-item:hover .chat-item-time { visibility: hidden; }
+.add-chat-btn { margin: 10px; padding: 10px; background: #2c2c2e; border: none; border-radius: 10px; color: #2563eb; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.add-chat-btn:hover { background: #3a3a3c; }
+
+/* MAIN */
+#main { flex: 1; display: flex; flex-direction: column; height: 100vh; min-width: 0; background: #141416; }
+#empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #3a3a3c; gap: 10px; }
+#empty-state .big-icon { font-size: 56px; }
+#chat-view { display: none; flex-direction: column; flex: 1; min-height: 0; }
+.chat-header { background: #1c1c1e; border-bottom: 1px solid #2c2c2e; padding: 12px 16px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.chat-header-avatar { width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+.chat-header-name { font-size: 15px; font-weight: 600; flex: 1; }
+.chat-header-sub { font-size: 11px; color: #30d158; display: flex; align-items: center; gap: 4px; }
+.live-dot { width: 5px; height: 5px; background: #30d158; border-radius: 50%; animation: blink 1.5s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+#messages { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 2px; background: #141416; }
+#messages::-webkit-scrollbar { width: 4px; }
+#messages::-webkit-scrollbar-thumb { background: #2c2c2e; border-radius: 4px; }
+.date-div { text-align: center; margin: 10px 0 5px; }
+.date-div span { background: #2c2c2e; color: #8e8e93; font-size: 11px; padding: 3px 12px; border-radius: 10px; }
+.msg-row { display: flex; margin-bottom: 2px; }
+.msg-row.sent { justify-content: flex-end; }
+.msg-row.recv { justify-content: flex-start; }
+.msg-row.sent + .msg-row.recv, .msg-row.recv + .msg-row.sent { margin-top: 8px; }
+.bubble { max-width: 68%; padding: 8px 12px 6px; font-size: 15px; line-height: 1.45; word-break: break-word; }
+.sent .bubble { background: #2563eb; color: #fff; border-radius: 18px 18px 4px 18px; }
+.recv .bubble { background: #2c2c2e; color: #ececec; border-radius: 18px 18px 18px 4px; }
+.btime { font-size: 10px; display: block; text-align: right; opacity: 0.5; margin-top: 2px; }
+.recv .btime { text-align: left; }
+.no-msgs { color: #3a3a3c; font-size: 14px; text-align: center; margin: auto; }
+
+/* Media bubbles */
+.media-bubble { background: transparent !important; padding: 0 !important; overflow: hidden; border-radius: 18px 18px 4px 18px; }
+.recv .media-bubble { border-radius: 18px 18px 18px 4px; }
+.media-img { width: 220px; height: 220px; border-radius: inherit; display: block; cursor: pointer; object-fit: cover; opacity: 0; animation: fadeIn 0.3s forwards; }
+.media-img:hover { opacity: 0.88; }
+@keyframes fadeIn { to { opacity: 1; } }
+.media-video { width: 220px; border-radius: inherit; display: block; outline: none; }
+.media-loading { width: 220px; height: 220px; border-radius: inherit; background: linear-gradient(90deg, #2c2c2e 25%, #3a3a3c 50%, #2c2c2e 75%); background-size: 400% 100%; animation: shimmer 1.4s infinite; }
+@keyframes shimmer { 0%{background-position:100% 0} 100%{background-position:-100% 0} }
+.media-loading.failed { animation: none; background: #2c2c2e; display: flex; align-items: center; justify-content: center; color: #636366; font-size: 12px; cursor: pointer; }
+.media-caption { font-size: 10px; color: #8e8e93; text-align: right; padding: 3px 8px 4px; background: rgba(0,0,0,0.35); border-radius: 0 0 4px 4px; margin-top: -4px; }
+.recv .media-caption { text-align: left; }
+
+/* Compose */
+.compose { background: #1c1c1e; border-top: 1px solid #2c2c2e; padding: 10px 14px; display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }
+#img-url-wrap { display: none; align-items: center; gap: 6px; margin-bottom: 6px; }
+#img-url { flex: 1; background: #2c2c2e; border: none; border-radius: 10px; padding: 7px 12px; font-size: 13px; color: #fff; outline: none; }
+.compose-inner { flex: 1; display: flex; flex-direction: column; }
+#msg-input { background: #2c2c2e; border: none; border-radius: 22px; padding: 10px 16px; font-size: 15px; font-family: inherit; color: #fff; resize: none; outline: none; max-height: 120px; line-height: 1.4; }
+#msg-input::placeholder { color: #48484a; }
+.compose-btns { display: flex; gap: 6px; align-items: flex-end; }
+.btn-attach { width: 38px; height: 38px; flex-shrink: 0; background: #2c2c2e; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; border: none; }
+#btn-send { width: 38px; height: 38px; flex-shrink: 0; background: #2563eb; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s, transform 0.1s; }
+#btn-send:hover { background: #1d4ed8; }
+#btn-send:active { transform: scale(0.9); }
+#btn-send svg { width: 17px; height: 17px; fill: #fff; margin-left: 2px; }
+#upload-status { display: none; padding: 5px 14px; font-size: 12px; color: #8e8e93; background: #1c1c1e; align-items: center; gap: 8px; flex-shrink: 0; }
+#upload-bar-wrap { flex: 1; background: #2c2c2e; border-radius: 4px; height: 4px; overflow: hidden; }
+#upload-bar { height: 4px; background: #2563eb; width: 0%; transition: width 0.2s; }
+
+/* Lightbox */
+#lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 999; align-items: center; justify-content: center; flex-direction: column; }
+#lightbox.open { display: flex; }
+#lightbox-img { max-width: 90vw; max-height: 85vh; border-radius: 12px; object-fit: contain; }
+#lightbox-close { position: absolute; top: 16px; right: 20px; background: none; border: none; color: #fff; font-size: 32px; cursor: pointer; opacity: 0.8; }
+#lightbox-close:hover { opacity: 1; }
+
+/* Toast */
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #2563eb; color: #fff; padding: 10px 18px; border-radius: 12px; font-size: 13px; z-index: 500; box-shadow: 0 4px 20px rgba(0,0,0,0.4); display: flex; align-items: center; gap: 8px; max-width: 320px; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+</head>
+<body>
+
+<!-- LOADING -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">Loading…</div>
+</div>
+
+<!-- AUTH -->
+<div id="auth-screen" class="hidden">
+  <div class="auth-box">
+    <h2>Messages</h2>
+    <p>Sign in to manage your models and chats</p>
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchTab('signin')">Sign In</button>
+      <button class="auth-tab" onclick="switchTab('signup')">Sign Up</button>
+    </div>
+    <div class="field"><label>Email</label><input id="auth-email" type="email" placeholder="you@example.com"/></div>
+    <div class="field"><label>Password</label><input id="auth-password" type="password" placeholder="••••••••"/></div>
+    <button class="btn-primary" id="auth-btn" onclick="doAuth()">Sign In</button>
+    <div class="auth-err" id="auth-err"></div>
+  </div>
+</div>
+
+<!-- MODELS SCREEN -->
+<div id="models-screen" class="hidden">
+  <div class="models-wrap">
+    <div class="models-header">
+      <h1>Your Models</h1>
+      <div class="models-header-right">
+        <span class="user-badge" id="user-email-badge"></span>
+        <button class="btn-signout" onclick="signOut()">Sign out</button>
+      </div>
+    </div>
+    <div class="models-list" id="models-list">
+      <div class="empty-models">
+        <div class="icon">📱</div>
+        <p>No models yet. Add your first one below.</p>
+      </div>
+    </div>
+    <div class="models-footer">
+      <button class="btn-add-model" onclick="openModelModal()">＋ Add Model</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-top">
+        <button class="model-switcher" onclick="goToModels()">
+          <div class="model-switcher-avatar" id="sw-avatar"></div>
+          <span class="model-switcher-name" id="sw-name">Select Model</span>
+          <span class="model-switcher-arrow">⇄</span>
+        </button>
+        <div class="sidebar-icons">
+          <button class="btn-icon" onclick="openAddContactModal()" title="New chat">✏</button>
+        </div>
+      </div>
+      <div class="search-wrap">
+        <input id="search-input" placeholder="Search contacts…" oninput="filterChats()"/>
+      </div>
+    </div>
+    <div id="chat-list"></div>
+    <button class="add-chat-btn" onclick="openAddContactModal()">＋ New conversation</button>
+  </div>
+  <div id="main">
+    <div id="empty-state">
+      <div class="big-icon">💬</div>
+      <p>Select a conversation</p>
+    </div>
+    <div id="chat-view">
+      <div class="chat-header">
+        <div class="chat-header-avatar" id="ch-avatar"></div>
+        <div style="flex:1;min-width:0;">
+          <div class="chat-header-name" id="ch-name"></div>
+          <div class="chat-header-sub"><span class="live-dot"></span>live</div>
+        </div>
+        <button class="btn-icon danger" onclick="deleteCurrentChat()" title="Delete">🗑</button>
+      </div>
+      <div id="upload-status">
+        <div id="upload-bar-wrap"><div id="upload-bar"></div></div>
+        <span id="upload-label"></span>
+      </div>
+      <div id="messages"><p class="no-msgs">Loading…</p></div>
+      <div class="compose">
+        <div class="compose-inner">
+          <div id="img-url-wrap">
+            <input id="img-url" placeholder="Paste image/video URL…"/>
+            <button onclick="clearImgUrl()" style="background:none;border:none;color:#636366;font-size:18px;cursor:pointer;">✕</button>
+          </div>
+          <textarea id="msg-input" placeholder="Message" rows="1"></textarea>
+        </div>
+        <div class="compose-btns">
+          <label class="btn-attach" title="Upload file">
+            📎<input type="file" id="file-input" accept="image/*,video/*" style="display:none;" onchange="uploadFile(this)"/>
+          </label>
+          <button id="btn-send" onclick="sendMsg()">
+            <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODEL MODAL -->
+<div id="modal-overlay">
+  <div class="modal-box">
+    <h3 id="modal-title">Add Model</h3>
+    <div class="field"><label>Model Name</label><input id="m-name" placeholder="e.g. Ava"/></div>
+    <div class="field"><label>Twilio Account SID</label><input id="m-sid" type="password" placeholder="ACxxxxxxxxxxxxxxxx"/></div>
+    <div class="field"><label>Twilio Auth Token</label><input id="m-auth" type="password" placeholder="your_auth_token"/></div>
+    <div class="field"><label>Twilio Phone Number</label><input id="m-num" placeholder="+17407377620"/></div>
+    <div class="modal-actions">
+      <button class="btn-sec" onclick="closeModelModal()">Cancel</button>
+      <button class="btn-primary" style="margin-top:0;" onclick="saveModel()">Save</button>
+    </div>
+    <div class="auth-err" id="modal-err"></div>
+  </div>
+</div>
+
+<!-- ADD CONTACT MODAL -->
+<div id="contact-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:600;align-items:center;justify-content:center;">
+  <div class="modal-box">
+    <h3>New conversation</h3>
+    <div class="field"><label>Name</label><input id="new-name" placeholder="e.g. John"/></div>
+    <div class="field"><label>Phone number</label><input id="new-num" placeholder="+15875687333"/></div>
+    <div class="modal-actions">
+      <button class="btn-sec" onclick="closeAddContactModal()">Cancel</button>
+      <button class="btn-primary" style="margin-top:0;" onclick="addContact()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- LIGHTBOX -->
+<div id="lightbox" onclick="closeLightbox()">
+  <button id="lightbox-close" onclick="closeLightbox()">✕</button>
+  <img id="lightbox-img" style="display:none;"/>
+  <video id="lightbox-video" style="display:none;" controls></video>
+</div>
+
+<script>
+// ── CONSTANTS ──
+const SUPABASE_URL = 'https://khjoizstnjovgkjykgvu.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtoam9penN0bmpvdmdranlrZ3Z1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4Njg3NDcsImV4cCI6MjA5MTQ0NDc0N30.cKC-cFEx2UtkOsQTwnh_cD0DNUBKObO-sicwp933RU8';
+const BUCKET = 'media';
+const PROXY = 'https://royal-term-bcac.bxxmzilla.workers.dev/';
+
+// Supabase JS client — handles session persistence internally (no localStorage needed)
+const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, storageKey: 'sb_session' }
+});
+
+// ── STATE ──
+let currentUser = null;
+let currentModel = null;
+let models = [];
+let contacts = [];
+let activeIdx = -1;
+let intervals = {};
+let lastSids = {};
+let chatCache = {};
+let scrollPositions = {};
+let pendingMediaUrl = null;
+let editingModelId = null;
+let inboundCheckInterval = null;
+let isFetching = {};
+const COLORS = ['#e74c8b','#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#a855f7'];
+function colorFor(i) { return COLORS[i % COLORS.length]; }
+
+// ── SUPABASE HELPERS ──
+function sbHeaders(token) {
+  const t = token || getAccessToken() || SUPABASE_KEY;
+  return { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' };
+}
+async function sbGet(path, params, token) {
+  let url = SUPABASE_URL + path;
+  if (params) url += '?' + Object.entries(params).map(([k,v]) => k+'='+encodeURIComponent(v)).join('&');
+  const r = await fetch(url, { headers: sbHeaders(token) });
+  return r.json();
+}
+async function sbPost(path, body, token, prefer) {
+  const h = { ...sbHeaders(token) };
+  if (prefer) h['Prefer'] = prefer;
+  const r = await fetch(SUPABASE_URL + path, { method: 'POST', headers: h, body: JSON.stringify(body) });
+  return r.json();
+}
+async function sbDelete(path, token) {
+  await fetch(SUPABASE_URL + path, { method: 'DELETE', headers: sbHeaders(token) });
+}
+function proxyUrl(path) { return PROXY + '?path=' + encodeURIComponent(path); }
+function initials(name, num) { if (name) return name.slice(0,2).toUpperCase(); return (num||'').replace(/\D/g,'').slice(-2); }
+function formatTime(d) { return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+function formatDate(d) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yest = new Date(today - 86400000);
+  const md = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  if (md.getTime() === today.getTime()) return 'Today';
+  if (md.getTime() === yest.getTime()) return 'Yesterday';
+  return d.toLocaleDateString([], {month:'long', day:'numeric'});
+}
+
+// ── AUTH ──
+let authMode = 'signin';
+function switchTab(mode) {
+  authMode = mode;
+  document.querySelectorAll('.auth-tab').forEach((t,i) => t.classList.toggle('active', (i===0&&mode==='signin')||(i===1&&mode==='signup')));
+  document.getElementById('auth-btn').textContent = mode === 'signin' ? 'Sign In' : 'Sign Up';
+  document.getElementById('auth-err').textContent = '';
+}
+async function doAuth() {
+  const email = document.getElementById('auth-email').value.trim();
+  const pass = document.getElementById('auth-password').value.trim();
+  if (!email||!pass) { document.getElementById('auth-err').textContent = 'Fill in all fields.'; return; }
+  document.getElementById('auth-btn').textContent = '…';
+  let result;
+  if (authMode === 'signin') {
+    result = await _sb.auth.signInWithPassword({ email, password: pass });
+  } else {
+    result = await _sb.auth.signUp({ email, password: pass });
+  }
+  if (result.error) {
+    document.getElementById('auth-err').textContent = result.error.message;
+    document.getElementById('auth-btn').textContent = authMode === 'signin' ? 'Sign In' : 'Sign Up';
+    return;
+  }
+  currentUser = result.data.session;
+  showModelsScreen();
+}
+async function signOut() {
+  await _sb.auth.signOut();
+  currentUser = null; currentModel = null;
+  stopAllPollers();
+  document.getElementById('app').classList.remove('visible');
+  document.getElementById('models-screen').classList.add('hidden');
+  document.getElementById('auth-screen').classList.remove('hidden');
+}
+
+// ── MODELS ──
+function getUserId() {
+  // Works with both supabase-js session shape and raw API shape
+  return currentUser?.user?.id || currentUser?.id || null;
+}
+
+function getAccessToken() {
+  return currentUser?.access_token || null;
+}
+
+// ── NOTIFICATION BADGE SYSTEM ──
+// Uses a timestamp (last_read_at) stored in updated_at column.
+// Unread = inbound messages with date_sent strictly after last_read_at.
+// This avoids SID-based race conditions where cached messages arrive after markAsRead fires.
+let unreadCounts = {};      // contactNum -> number
+let pendingReadTime = {};   // contactNum -> ISO timestamp written but not yet confirmed by DB
+
+async function loadReadStates() {
+  const userId = getUserId();
+  const data = await sbGet('/rest/v1/read_state', {
+    select: 'contact_num,updated_at',
+    user_id: 'eq.' + userId,
+    model_id: 'eq.' + currentModel.id
+  });
+  const dbMap = {};
+  if (Array.isArray(data)) data.forEach(r => { dbMap[r.contact_num] = r.updated_at; });
+  contacts.forEach(c => {
+    // Use in-memory pending timestamp until DB confirms (prevents badge flickering back)
+    const dbTime = dbMap[c.num] || null;
+    const lastReadAt = pendingReadTime[c.num] !== undefined ? pendingReadTime[c.num] : dbTime;
+    // Once DB has caught up, clear the pending entry
+    if (pendingReadTime[c.num] !== undefined && dbTime >= pendingReadTime[c.num]) delete pendingReadTime[c.num];
+    const msgs = chatCache[c.num] || [];
+    if (!lastReadAt) {
+      unreadCounts[c.num] = 0; // Never opened — treat as all read; badge appears only for new arrivals
+    } else {
+      unreadCounts[c.num] = msgs.filter(m =>
+        !m.direction.startsWith('outbound') &&
+        new Date(m.date_sent || m.date_created) > new Date(lastReadAt)
+      ).length;
+    }
+  });
+}
+
+function markAsRead(contactNum) {
+  if (!currentModel || !currentUser) return;
+  const now = new Date().toISOString();
+  unreadCounts[contactNum] = 0;
+  pendingReadTime[contactNum] = now;
+  renderChatList();
+  const userId = getUserId();
+  fetch(SUPABASE_URL + '/rest/v1/read_state', {
+    method: 'POST',
+    headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ user_id: userId, model_id: currentModel.id, contact_num: contactNum, updated_at: now })
+  }).catch(e => console.warn('markAsRead:', e));
+}
+
+let badgeSyncInterval = null;
+function startBadgeSyncer() {
+  if (badgeSyncInterval) clearInterval(badgeSyncInterval);
+  badgeSyncInterval = setInterval(async () => {
+    await loadReadStates();
+    renderChatList();
+  }, 3000);
+}
+function stopBadgeSyncer() { if (badgeSyncInterval) { clearInterval(badgeSyncInterval); badgeSyncInterval = null; } }
+
+async function loadModels() {
+  const userId = getUserId();
+  const data = await sbGet('/rest/v1/models', { select: '*', user_id: 'eq.' + userId, order: 'created_at.asc' });
+  models = Array.isArray(data) ? data : [];
+  console.log('Models loaded:', models.length, data);
+}
+function renderModels() {
+  const list = document.getElementById('models-list');
+  if (!models.length) {
+    list.innerHTML = '<div class="empty-models"><div class="icon">📱</div><p>No models yet. Add your first one below.</p></div>';
+    return;
+  }
+  list.innerHTML = '';
+  models.forEach((m, i) => {
+    const card = document.createElement('div');
+    card.className = 'model-card';
+    card.innerHTML = `
+      <div class="model-avatar" style="background:${colorFor(i)}">${initials(m.name, m.twilio_number)}</div>
+      <div class="model-info">
+        <div class="model-name">${m.name}</div>
+        <div class="model-num">${m.twilio_number}</div>
+      </div>
+      <div class="model-actions">
+        <button class="btn-icon" onclick="event.stopPropagation();editModel('${m.id}')">✏</button>
+        <button class="btn-icon danger" onclick="event.stopPropagation();deleteModel('${m.id}')">🗑</button>
+      </div>`;
+    card.onclick = () => selectModel(m);
+    list.appendChild(card);
+  });
+}
+function openModelModal(id) {
+  editingModelId = id || null;
+  document.getElementById('modal-title').textContent = id ? 'Edit Model' : 'Add Model';
+  document.getElementById('modal-err').textContent = '';
+  if (!id) { ['m-name','m-sid','m-auth','m-num'].forEach(x => document.getElementById(x).value = ''); }
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function editModel(id) {
+  const m = models.find(x => x.id === id);
+  if (!m) return;
+  editingModelId = id;
+  document.getElementById('modal-title').textContent = 'Edit Model';
+  document.getElementById('m-name').value = m.name;
+  document.getElementById('m-sid').value = m.twilio_sid;
+  document.getElementById('m-auth').value = m.twilio_auth;
+  document.getElementById('m-num').value = m.twilio_number;
+  document.getElementById('modal-err').textContent = '';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModelModal() { document.getElementById('modal-overlay').classList.remove('open'); editingModelId = null; }
+async function saveModel() {
+  const name = document.getElementById('m-name').value.trim();
+  const sid = document.getElementById('m-sid').value.trim();
+  const auth = document.getElementById('m-auth').value.trim();
+  const num = document.getElementById('m-num').value.trim();
+  if (!name||!sid||!auth||!num) { document.getElementById('modal-err').textContent = 'Fill in all fields.'; return; }
+  const body = { name, twilio_sid: sid, twilio_auth: auth, twilio_number: num, user_id: getUserId() };
+  if (editingModelId) {
+    await fetch(SUPABASE_URL + '/rest/v1/models?id=eq.' + editingModelId, {
+      method: 'PATCH', headers: { ...sbHeaders(currentUser.access_token), 'Prefer': 'return=representation' }, body: JSON.stringify(body)
+    });
+  } else {
+    await sbPost('/rest/v1/models', body, 'return=representation');
+  }
+  closeModelModal();
+  await loadModels();
+  renderModels();
+}
+async function deleteModel(id) {
+  if (!confirm('Delete this model and all its contacts?')) return;
+  await sbDelete('/rest/v1/models?id=eq.' + id);
+  await loadModels();
+  renderModels();
+  if (currentModel?.id === id) { currentModel = null; goToModels(); }
+}
+async function selectModel(m) {
+  currentModel = m;
+  // Save last used model to Supabase user metadata
+  await _sb.auth.updateUser({ data: { last_model_id: m.id } });
+  document.getElementById('models-screen').classList.add('hidden');
+  document.getElementById('app').classList.add('visible');
+  const idx = models.findIndex(x => x.id === m.id);
+  document.getElementById('sw-avatar').textContent = initials(m.name, m.twilio_number);
+  document.getElementById('sw-avatar').style.background = colorFor(idx);
+  document.getElementById('sw-name').textContent = m.name;
+  await initChat();
+}
+function goToModels() {
+  stopAllPollers();
+  contacts = []; activeIdx = -1; lastSids = {}; chatCache = {}; unreadCounts = {}; lastReadSids = {};
+  document.getElementById('app').classList.remove('visible');
+  document.getElementById('chat-view').style.display = 'none';
+  document.getElementById('empty-state').style.display = 'flex';
+  document.getElementById('chat-list').innerHTML = '';
+  document.getElementById('models-screen').classList.remove('hidden');
+}
+async function showModelsScreen() {
+  document.getElementById('auth-screen').classList.add('hidden');
+  setLoading('Loading models…');
+  await loadModels();
+  hideLoading();
+  document.getElementById('user-email-badge').textContent = currentUser.user?.email || '';
+  document.getElementById('models-screen').classList.remove('hidden');
+  renderModels();
+}
+
+// ── CONTACTS (scoped to model) ──
+async function loadContactsFromDB() {
+  const userId = getUserId();
+  const data = await sbGet('/rest/v1/contacts', { select: '*', model_id: 'eq.' + currentModel.id, user_id: 'eq.' + userId, order: 'created_at.asc' });
+  contacts = Array.isArray(data) ? data.map(r => ({ id: r.id, name: r.name||'', num: r.num, lastMsg: r.last_msg||'', lastTime: r.last_time||null })) : [];
+}
+async function saveContactToDB(c) {
+  const userId = getUserId();
+  const body = { name: c.name||'', num: c.num, last_msg: c.lastMsg||'', last_time: c.lastTime||null, model_id: currentModel.id, user_id: userId };
+  if (c.id) body.id = c.id;
+  const r = await fetch(SUPABASE_URL + '/rest/v1/contacts', {
+    method: 'POST', headers: { ...sbHeaders(currentUser.access_token), 'Prefer': 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify(body)
+  });
+  const data = await r.json();
+  return Array.isArray(data) && data[0] ? data[0].id : c.id;
+}
+async function deleteContactFromDB(id) {
+  await sbDelete('/rest/v1/contacts?id=eq.' + id);
+}
+
+// ── MESSAGES CACHE ──
+async function cacheMessages(contactNum, msgs) {
+  if (!msgs.length) return;
+  const userId = getUserId();
+  const urlRegex = /^https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp|mp4|mov)(\?[^\s]*)?$/i;
+  const rows = msgs.map(m => ({
+    contact_num: contactNum, sid: m.sid, direction: m.direction, body: m.body||'',
+    num_media: parseInt(m.num_media||0),
+    media_url: m.media_url || ((m.body||'').trim().match(urlRegex) ? (m.body||'').trim() : null),
+    date_sent: m.date_sent || m.date_created,
+    model_id: currentModel.id, user_id: userId
+  }));
+  await fetch(SUPABASE_URL + '/rest/v1/messages_cache', {
+    method: 'POST', headers: { ...sbHeaders(currentUser.access_token), 'Prefer': 'resolution=merge-duplicates' }, body: JSON.stringify(rows)
+  });
+}
+async function cacheSingleMessage(contactNum, m) { await cacheMessages(contactNum, [m]); }
+async function loadCachedMessages(contactNum) {
+  const userId = getUserId();
+  const data = await sbGet('/rest/v1/messages_cache', {
+    select: '*', contact_num: 'eq.' + contactNum, model_id: 'eq.' + currentModel.id,
+    user_id: 'eq.' + userId, order: 'date_sent.asc', limit: 50
+  });
+  if (!Array.isArray(data)) return [];
+  return data.map(r => ({ sid: r.sid, direction: r.direction, body: r.body, num_media: r.num_media, media_url: r.media_url||null, date_sent: r.date_sent, date_created: r.date_sent }));
+}
+
+// ── CHAT INIT ──
+async function initChat() {
+  setLoading('Loading chats…');
+  await loadContactsFromDB();
+  contacts.forEach((_, i) => { lastSids[i] = new Set(); });
+  await preloadAllChats();
+  // Populate lastSids from cache so poller never treats cached msgs as new
+  contacts.forEach((c, i) => {
+    const msgs = chatCache[c.num] || [];
+    lastSids[i] = new Set(msgs.map(m => m.sid));
+  });
+  await loadReadStates();
+  hideLoading();
+  renderChatList();
+  startAllPollers();
+  startInboundChecker();
+}
+async function preloadAllChats() {
+  for (let i = 0; i < contacts.length; i++) {
+    const c = contacts[i];
+    setLoading(`Loading ${c.name || c.num} (${i+1}/${contacts.length})…`);
+    const cached = await loadCachedMessages(c.num);
+    chatCache[c.num] = cached;
+    fetchAndCacheContact(i);
+  }
+}
+
+// ── RENDER CHAT LIST ──
+function renderChatList() {
+  const q = (document.getElementById('search-input').value||'').toLowerCase();
+  const list = document.getElementById('chat-list');
+  list.innerHTML = '';
+  contacts.forEach((c, i) => {
+    if (q && !c.name.toLowerCase().includes(q) && !c.num.includes(q)) return;
+    const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
+    const div = document.createElement('div');
+    div.className = 'chat-item' + (i === activeIdx ? ' active' : '');
+    div.onclick = () => openChat(i).catch(console.error);
+    div.innerHTML = `
+      <div class="chat-avatar" style="background:${colorFor(i)}">${initials(c.name, c.num)}</div>
+      <div class="chat-item-info">
+        <div class="chat-item-top">
+          <span class="chat-item-name">${c.name||c.num}</span>
+          <span class="chat-item-time">${time}</span>
+        </div>
+        <div class="chat-item-preview">${c.lastMsg||'No messages yet'}</div>
+      </div>
+      ${(unreadCounts[c.num] || 0) > 0 ? `<span class="unread-badge">${unreadCounts[c.num]}</span>` : ''}
+      <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat(${i})">Delete</button>`;
+    list.appendChild(div);
+  });
+}
+function filterChats() { renderChatList(); }
+
+// ── OPEN CHAT ──
+async function openChat(idx) {
+  const area = document.getElementById('messages');
+  if (activeIdx >= 0 && activeIdx !== idx) scrollPositions[activeIdx] = area.scrollTop;
+  activeIdx = idx;
+  const c = contacts[idx];
+  const allMsgs = chatCache[c.num] || [];
+
+  // Mark as read instantly — updates memory + badge + saves to DB in background
+  markAsRead(c.num);
+  document.getElementById('empty-state').style.display = 'none';
+  const cv = document.getElementById('chat-view');
+  cv.style.display = 'flex'; cv.style.flexDirection = 'column'; cv.style.flex = '1'; cv.style.minHeight = '0';
+  document.getElementById('ch-name').textContent = c.name || c.num;
+  const av = document.getElementById('ch-avatar');
+  av.textContent = initials(c.name, c.num); av.style.background = colorFor(idx);
+  area.innerHTML = '';
+  lastSids[idx] = new Set();
+  renderMessages(idx, allMsgs);
+  if (scrollPositions[idx] !== undefined) area.scrollTop = scrollPositions[idx];
+  else area.scrollTop = area.scrollHeight;
+  renderChatList();
+}
+
+// ── RENDER MESSAGES (initial load only) ──
+function renderMessages(idx, msgs) {
+  const area = document.getElementById('messages');
+  area.innerHTML = '';
+  lastSids[idx] = new Set(msgs.map(m => m.sid));
+  if (contacts[idx]) {
+    const last = msgs[msgs.length-1];
+    if (last) { contacts[idx].lastMsg = (last.direction.startsWith('outbound')?'You: ':'')+(last.body||'').slice(0,40); contacts[idx].lastTime = last.date_sent||last.date_created; }
+  }
+  renderChatList();
+  msgs.forEach(m => appendMessageToDOM(area, m, idx));
+}
+
+// ── APPEND SINGLE MESSAGE ──
+function appendMessageToDOM(area, m, idx) {
+  const sent = m.direction && m.direction.startsWith('outbound');
+  const date = new Date(m.date_sent || m.date_created);
+  const ts = formatTime(date);
+  const ds = formatDate(date);
+
+  if (ds !== null) {
+    const allDivs = area.querySelectorAll('.date-div');
+    const lastDivText = allDivs.length ? allDivs[allDivs.length-1].querySelector('span')?.textContent : '';
+    if (ds !== lastDivText) {
+      const d = document.createElement('div');
+      d.className = 'date-div';
+      d.innerHTML = `<span>${ds}</span>`;
+      area.appendChild(d);
+    }
+  }
+
+  const row = document.createElement('div');
+  row.className = 'msg-row ' + (sent ? 'sent' : 'recv');
+  row.dataset.sid = m.sid;
+
+  const bodyText = m.body || '';
+  const urlRegex = /(https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp|mp4|mov)(\?[^\s]*)?)/gi;
+  const mediaUrlFromCache = m.media_url || null;
+  const isMediaUrl = mediaUrlFromCache || bodyText.trim().match(/^https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp|mp4|mov)(\?[^\s]*)?$/i);
+  const mediaUrlToUse = mediaUrlFromCache || bodyText.trim();
+  const isVid = (mediaUrlToUse||'').match(/\.(mp4|mov)(\?[^\s]*)?$/i);
+  const hasTwilioMedia = !isMediaUrl && m.num_media && parseInt(m.num_media) > 0;
+  const bubble = document.createElement('div');
+
+  if (hasTwilioMedia) {
+    bubble.className = 'bubble media-bubble';
+    bubble.innerHTML = `<div class="media-loading"></div><div class="media-caption">${ts}</div>`;
+    row.appendChild(bubble); area.appendChild(row);
+    loadTwilioMedia(m.sid, idx, bubble, ts);
+  } else if (isMediaUrl) {
+    bubble.className = 'bubble media-bubble';
+    if (isVid) {
+      bubble.innerHTML = `<video class="media-video" src="${mediaUrlToUse}" controls onclick="event.stopPropagation()"></video><div class="media-caption">${ts}</div>`;
+    } else {
+      const esc = (mediaUrlToUse||'').replace(/"/g,'&quot;');
+      bubble.innerHTML = `<img class="media-img" src="${esc}" onclick="openLightbox('${esc}',false,'${ts}')" onerror="this.parentElement.style.display='none'" /><div class="media-caption">${ts}</div>`;
+    }
+    row.appendChild(bubble); area.appendChild(row);
+  } else {
+    bubble.className = 'bubble';
+    const urlMatches = bodyText.match(urlRegex) || [];
+    const textOnly = bodyText.replace(urlRegex,'').trim();
+    let inner = '';
+    urlMatches.forEach(url => {
+      if (url.match(/\.(mp4|mov)/i)) inner += `<video class="media-video" src="${url}" controls style="margin-bottom:4px;" onclick="event.stopPropagation()"></video>`;
+      else { const esc=url.replace(/"/g,'&quot;'); inner += `<img class="media-img" src="${esc}" style="margin-bottom:4px;" onclick="openLightbox('${esc}',false,'')" onerror="this.style.display='none'" />`; }
+    });
+    if (textOnly) inner += `<span style="display:block;padding:2px 0;">${textOnly}</span>`;
+    inner += `<span class="btime">${ts}</span>`;
+    bubble.innerHTML = inner;
+    row.appendChild(bubble); area.appendChild(row);
+  }
+}
+
+// ── FETCH & CACHE (poller) ──
+async function fetchAndCacheContact(idx) {
+  if (!currentModel || !contacts[idx] || isFetching[idx]) return;
+  isFetching[idx] = true;
+  const c = contacts[idx];
+  const sid = currentModel.twilio_sid, auth = currentModel.twilio_auth, fromNum = currentModel.twilio_number;
+  try {
+    const headers = {'Authorization': 'Basic ' + btoa(sid+':'+auth)};
+    const base = `/2010-04-01/Accounts/${sid}/Messages.json`;
+    const [s, r] = await Promise.all([
+      fetch(proxyUrl(`${base}?From=${encodeURIComponent(fromNum)}&To=${encodeURIComponent(c.num)}&PageSize=50`),{headers}).then(x=>x.json()),
+      fetch(proxyUrl(`${base}?From=${encodeURIComponent(c.num)}&To=${encodeURIComponent(fromNum)}&PageSize=50`),{headers}).then(x=>x.json())
+    ]);
+    if ((s.status||r.status)===401||s.code||r.code) return;
+    const seen = new Set();
+    const all = [...(s.messages||[]),...(r.messages||[])].filter(m=>{if(seen.has(m.sid))return false;seen.add(m.sid);return true;}).sort((a,b)=>new Date(a.date_sent||a.date_created)-new Date(b.date_sent||b.date_created));
+    const known = lastSids[idx] || new Set();
+    const newMsgs = all.filter(m => !known.has(m.sid));
+    if (!newMsgs.length) return;
+    chatCache[c.num] = all;
+    newMsgs.forEach(m => known.add(m.sid));
+    lastSids[idx] = known;
+    cacheMessages(c.num, newMsgs);
+    const last = all[all.length-1];
+    contacts[idx].lastMsg = (last.direction.startsWith('outbound')?'You: ':'')+(last.body||'').slice(0,40);
+    contacts[idx].lastTime = last.date_sent||last.date_created;
+    saveContactToDB(contacts[idx]);
+    if (activeIdx !== idx) {
+      renderChatList();
+      return;
+    }
+    const area = document.getElementById('messages');
+    let added = false;
+    newMsgs.forEach(m => { if (area.querySelector(`[data-sid="${m.sid}"]`)) return; appendMessageToDOM(area, m, idx); added = true; });
+    if (added) {
+      area.scrollTop = area.scrollHeight;
+      markAsRead(c.num);
+    }
+    renderChatList();
+  } catch(e) {} finally { isFetching[idx] = false; }
+}
+
+function startPoller(idx) { if (intervals[idx]) clearInterval(intervals[idx]); intervals[idx] = setInterval(() => fetchAndCacheContact(idx), 1000); }
+function startAllPollers() { stopAllPollers(); contacts.forEach((_,i) => startPoller(i)); startBadgeSyncer(); }
+function stopAllPollers() { Object.values(intervals).forEach(clearInterval); intervals = {}; if (inboundCheckInterval) { clearInterval(inboundCheckInterval); inboundCheckInterval = null; } stopBadgeSyncer(); }
+
+// ── INBOUND CHECKER ──
+async function checkForNewSenders() {
+  if (!currentModel) return;
+  const sid = currentModel.twilio_sid, auth = currentModel.twilio_auth, fromNum = currentModel.twilio_number;
+  try {
+    const headers = {'Authorization': 'Basic ' + btoa(sid+':'+auth)};
+    const res = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages.json?To=${encodeURIComponent(fromNum)}&PageSize=50`),{headers});
+    const data = await res.json();
+    if (!data.messages) return;
+    for (const msg of data.messages) {
+      const senderNum = msg.from;
+      if (!senderNum || contacts.some(c => c.num === senderNum)) continue;
+      const newC = {name:'', num:senderNum, lastMsg:msg.body||'', lastTime:msg.date_sent||msg.date_created};
+      const dbId = await saveContactToDB(newC);
+      newC.id = dbId;
+      contacts.push(newC);
+      const i = contacts.length-1;
+      lastSids[i] = new Set();
+      startPoller(i); renderChatList();
+      showToast(`💬 New message from ${senderNum}`, (msg.body||'').slice(0,50));
+    }
+  } catch(e) {}
+}
+function startInboundChecker() { if (inboundCheckInterval) clearInterval(inboundCheckInterval); checkForNewSenders(); inboundCheckInterval = setInterval(checkForNewSenders, 5000); }
+
+// ── CONTACTS ──
+function openAddContactModal() { document.getElementById('contact-modal').style.display = 'flex'; }
+function closeAddContactModal() { document.getElementById('contact-modal').style.display = 'none'; document.getElementById('new-name').value=''; document.getElementById('new-num').value=''; }
+async function addContact() {
+  const name = document.getElementById('new-name').value.trim();
+  const num = document.getElementById('new-num').value.trim();
+  if (!num) return;
+  const newC = {name, num, lastMsg:'', lastTime:null};
+  const dbId = await saveContactToDB(newC);
+  newC.id = dbId;
+  contacts.push(newC);
+  const i = contacts.length-1;
+  lastSids[i] = new Set();
+  closeAddContactModal(); renderChatList(); startPoller(i); openChat(i);
+}
+async function deleteChat(idx) {
+  if (!confirm('Delete this conversation?')) return;
+  if (intervals[idx]) clearInterval(intervals[idx]);
+  const c = contacts[idx];
+  if (c.id) await deleteContactFromDB(c.id);
+  await sbDelete(`/rest/v1/messages_cache?contact_num=eq.${encodeURIComponent(c.num)}&model_id=eq.${currentModel.id}`);
+  contacts.splice(idx,1);
+  if (activeIdx===idx) { activeIdx=-1; document.getElementById('chat-view').style.display='none'; document.getElementById('empty-state').style.display='flex'; }
+  else if (activeIdx>idx) activeIdx--;
+  renderChatList(); startAllPollers();
+}
+function deleteCurrentChat() { if (activeIdx>=0) deleteChat(activeIdx); }
+
+// ── SEND ──
+async function sendMsg() {
+  const body = document.getElementById('msg-input').value.trim();
+  const imgUrl = pendingMediaUrl || document.getElementById('img-url').value.trim() || '';
+  if (!body && !imgUrl) return;
+  if (activeIdx < 0 || !currentModel) return;
+  const c = contacts[activeIdx];
+  const {twilio_sid:sid, twilio_auth:auth, twilio_number:fromNum} = currentModel;
+  try {
+    const fd = new FormData();
+    fd.append('From', fromNum); fd.append('To', c.num); fd.append('Body', body||'');
+    if (imgUrl) fd.append('MediaUrl', imgUrl);
+    const r = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages.json`), {
+      method:'POST', headers:{'Authorization':'Basic '+btoa(sid+':'+auth)}, body:fd
+    });
+    const d = await r.json();
+    if (d.error_code||d.code) return;
+    document.getElementById('msg-input').value=''; document.getElementById('msg-input').style.height='auto'; clearImgUrl();
+    const optMsg = { sid:d.sid, direction:'outbound-api', body:d.body||body, num_media:imgUrl?1:0, media_url:imgUrl||null, date_sent:d.date_created||new Date().toISOString(), date_created:d.date_created||new Date().toISOString() };
+    const area = document.getElementById('messages');
+    appendMessageToDOM(area, optMsg, activeIdx);
+    lastSids[activeIdx].add(d.sid);
+    if (chatCache[c.num]) chatCache[c.num].push(optMsg);
+    cacheSingleMessage(c.num, optMsg);
+    area.scrollTop = area.scrollHeight;
+  } catch(e) {}
+}
+
+// ── TWILIO MEDIA ──
+async function loadTwilioMedia(msgSid, contactIdx, bubble, ts) {
+  if (!bubble || !currentModel) return;
+  const {twilio_sid:sid, twilio_auth:auth} = currentModel;
+  try {
+    const headers = {'Authorization':'Basic '+btoa(sid+':'+auth)};
+    const res = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages/${msgSid}/Media.json`),{headers});
+    const data = await res.json();
+    if (!data.media_list||!data.media_list.length) { const el=bubble.querySelector('.media-loading'); if(el){el.classList.add('failed');el.textContent='No media';} return; }
+    const loadingDiv = bubble.querySelector('.media-loading');
+    for (const media of data.media_list) {
+      const ct = media.content_type||'';
+      try {
+        const mr = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages/${msgSid}/Media/${media.sid}`),{headers,redirect:'follow'});
+        if (!mr.ok) throw new Error('failed');
+        const blob = await mr.blob();
+        const objUrl = URL.createObjectURL(blob);
+        if (ct.startsWith('video')) {
+          const vid = document.createElement('video'); vid.className='media-video'; vid.src=objUrl; vid.controls=true; vid.onclick=e=>e.stopPropagation();
+          if (loadingDiv) loadingDiv.replaceWith(vid); else bubble.insertBefore(vid,bubble.firstChild);
+        } else {
+          const img = document.createElement('img'); img.className='media-img'; img.src=objUrl;
+          img.onclick=()=>openLightbox(objUrl,false,ts);
+          img.onerror=()=>{if(loadingDiv){loadingDiv.classList.add('failed');loadingDiv.textContent='📎 Tap to view';loadingDiv.style.cursor='pointer';loadingDiv.onclick=()=>window.open(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages/${msgSid}/Media/${media.sid}`);}};
+          if (loadingDiv) loadingDiv.replaceWith(img); else bubble.insertBefore(img,bubble.firstChild);
+        }
+      } catch(e2) { if(loadingDiv){loadingDiv.classList.add('failed');loadingDiv.textContent='📎 Tap to view';loadingDiv.style.cursor='pointer';loadingDiv.onclick=()=>window.open(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages/${msgSid}/Media/${media.sid}`);} }
+    }
+  } catch(e) { const el=bubble.querySelector('.media-loading'); if(el){el.classList.add('failed');el.textContent='Failed';} }
+}
+
+// ── UPLOAD ──
+async function uploadFile(input) {
+  const file = input.files[0]; if (!file) return; input.value='';
+  const statusEl=document.getElementById('upload-status'), barEl=document.getElementById('upload-bar'), labelEl=document.getElementById('upload-label');
+  statusEl.style.display='flex'; barEl.style.width='10%'; labelEl.textContent='Uploading '+file.name+'…';
+  const ext=file.name.split('.').pop();
+  const filename=Date.now()+'_'+Math.random().toString(36).slice(2)+'.'+ext;
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${filename}`);
+    xhr.setRequestHeader('Authorization','Bearer '+SUPABASE_KEY);
+    xhr.setRequestHeader('x-upsert','true');
+    xhr.upload.onprogress = e => { if(e.lengthComputable) barEl.style.width=Math.round(e.loaded/e.total*90)+'%'; };
+    await new Promise((res,rej)=>{ xhr.onload=()=>xhr.status<300?res():rej(new Error('Upload failed: '+xhr.status)); xhr.onerror=()=>rej(new Error('Network error')); xhr.send(file); });
+    barEl.style.width='100%';
+    const publicUrl=`${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
+    pendingMediaUrl=publicUrl;
+    document.getElementById('img-url').value=publicUrl;
+    document.getElementById('img-url-wrap').style.display='flex';
+    labelEl.textContent='Ready to send: '+file.name;
+    setTimeout(()=>{statusEl.style.display='none';barEl.style.width='0%';},2500);
+    document.getElementById('msg-input').focus();
+  } catch(e) {
+    labelEl.textContent='Upload failed: '+e.message; barEl.style.background='#ff453a';
+    setTimeout(()=>{statusEl.style.display='none';barEl.style.background='#2563eb';barEl.style.width='0%';},3000);
+  }
+}
+function clearImgUrl() { pendingMediaUrl=null; const el=document.getElementById('img-url'); if(el)el.value=''; const wrap=document.getElementById('img-url-wrap'); if(wrap)wrap.style.display='none'; }
+
+// ── LIGHTBOX ──
+function openLightbox(src,isVideo,caption) {
+  const img=document.getElementById('lightbox-img'), vid=document.getElementById('lightbox-video');
+  if(isVideo){img.style.display='none';vid.style.display='block';vid.src=src;vid.play();}
+  else{vid.style.display='none';vid.pause();vid.src='';img.style.display='block';img.src=src;}
+  document.getElementById('lightbox').classList.add('open');
+}
+function closeLightbox() { document.getElementById('lightbox-video').pause(); document.getElementById('lightbox').classList.remove('open'); }
+
+// ── TOAST ──
+function showToast(title, preview) {
+  const t=document.createElement('div'); t.className='toast';
+  t.innerHTML=`<div><div style="font-weight:600;">${title}</div><div style="opacity:0.8;font-size:12px;margin-top:2px;">${preview}</div></div>`;
+  document.body.appendChild(t); setTimeout(()=>t.remove(),5000);
+}
+
+// ── UI HELPERS ──
+function setLoading(text) { document.getElementById('loading-overlay').classList.remove('hidden'); document.getElementById('loading-text').textContent=text||'Loading…'; }
+function hideLoading() { document.getElementById('loading-overlay').classList.add('hidden'); }
+
+// ── INPUT EVENTS ──
+document.getElementById('msg-input').addEventListener('input', function() { this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px'; });
+document.getElementById('msg-input').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();} });
+document.getElementById('messages').addEventListener('scroll', () => { if(activeIdx>=0) scrollPositions[activeIdx]=document.getElementById('messages').scrollTop; });
+
+// ── INIT ──
+(async function() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+  }
+  // supabase-js handles session persistence & auto-refresh automatically
+  const { data: { session } } = await _sb.auth.getSession();
+
+  // Keep token fresh on auth state changes
+  _sb.auth.onAuthStateChange((event, newSession) => {
+    if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && newSession) {
+      currentUser = newSession;
+    } else if (event === 'SIGNED_OUT') {
+      currentUser = null;
+    }
+  });
+
+  if (session?.access_token) {
+    currentUser = session;
+    await loadModels();
+    const lastModelId = session.user?.user_metadata?.last_model_id;
+    if (lastModelId) {
+      const lastModel = models.find(m => m.id === lastModelId);
+      if (lastModel) {
+        // Go straight into the last used model
+        hideLoading();
+        currentModel = lastModel;
+        document.getElementById('auth-screen').classList.add('hidden');
+        document.getElementById('app').classList.add('visible');
+        const idx = models.findIndex(x => x.id === lastModel.id);
+        document.getElementById('sw-avatar').textContent = initials(lastModel.name, lastModel.twilio_number);
+        document.getElementById('sw-avatar').style.background = colorFor(idx);
+        document.getElementById('sw-name').textContent = lastModel.name;
+        document.getElementById('user-email-badge').textContent = session.user?.email || '';
+        await initChat();
+        return;
+      }
+    }
+    // No last model — show models screen
+    hideLoading();
+    showModelsScreen();
+    return;
+  }
+
+  hideLoading();
+  document.getElementById('auth-screen').classList.remove('hidden');
+})();
+</script>
+</body>
+</html>
