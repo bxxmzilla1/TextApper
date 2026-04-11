@@ -102,18 +102,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .chat-item:hover { background: #252527; }
 .chat-item.active { background: #2c2c2e; }
 .chat-avatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; }
-.chat-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.chat-item-row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.chat-item-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
-.chat-item-time { font-size: 12px; color: #8e8e93; flex-shrink: 0; }
-.chat-item-preview-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.chat-item-preview { font-size: 13px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; line-height: 1.25; }
-.chat-item-preview.chat-item-preview-unread { font-weight: 600; color: #e8e8ed; }
-.tg-unread-badge { flex-shrink: 0; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #3390ec; color: #fff; font-size: 13px; font-weight: 600; line-height: 20px; text-align: center; box-sizing: border-box; }
-.tg-unread-badge.tg-unread-badge--compact { padding: 0 5px; font-size: 11px; }
+.chat-item-info { flex: 1; min-width: 0; }
+.chat-item-top { display: flex; justify-content: space-between; align-items: baseline; }
+.chat-item-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.chat-item-time { font-size: 11px; color: #636366; flex-shrink: 0; }
+.chat-item-preview { font-size: 12px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .chat-item-delete { display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #ff453a; border: none; color: #fff; border-radius: 7px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
 .chat-item:hover .chat-item-delete { display: block; }
-.chat-item:hover .tg-unread-badge { display: none; }
 .chat-item:hover .chat-item-time { visibility: hidden; }
 .add-chat-btn { margin: 10px; padding: 10px; background: #2c2c2e; border: none; border-radius: 10px; color: #2563eb; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
 .add-chat-btn:hover { background: #3a3a3c; }
@@ -357,11 +352,6 @@ let pendingMediaUrl = null;
 let editingModelId = null;
 let inboundCheckInterval = null;
 let isFetching = {};
-let unreadCounts = {};
-let pendingReadTime = {};
-let lastReadDb = {};
-let badgeSyncInterval = null;
-const DOC_TITLE = 'Messages';
 const COLORS = ['#e74c8b','#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#a855f7'];
 function colorFor(i) { return COLORS[i % COLORS.length]; }
 
@@ -429,7 +419,6 @@ async function signOut() {
   await _sb.auth.signOut();
   currentUser = null; currentModel = null;
   stopAllPollers();
-  document.title = DOC_TITLE;
   document.getElementById('app').classList.remove('visible');
   document.getElementById('models-screen').classList.add('hidden');
   document.getElementById('auth-screen').classList.remove('hidden');
@@ -443,85 +432,6 @@ function getUserId() {
 
 function getAccessToken() {
   return currentUser?.access_token || null;
-}
-
-// ── Telegram-style unread (read_state.updated_at = last read time; inbound after that = unread) ──
-function formatUnreadBadge(n) {
-  if (n > 99) return '99+';
-  return String(n);
-}
-
-function syncUnreadFromCache() {
-  contacts.forEach((c) => {
-    const dbTime = lastReadDb[c.num] || null;
-    if (pendingReadTime[c.num] !== undefined && dbTime && new Date(dbTime) >= new Date(pendingReadTime[c.num])) delete pendingReadTime[c.num];
-    const cutoffStr = pendingReadTime[c.num] !== undefined ? pendingReadTime[c.num] : dbTime;
-    const msgs = chatCache[c.num] || [];
-    const isActive = activeIdx >= 0 && contacts[activeIdx] && contacts[activeIdx].num === c.num;
-    if (isActive) unreadCounts[c.num] = 0;
-    else if (!cutoffStr) {
-      unreadCounts[c.num] = msgs.filter((m) => !m.direction.startsWith('outbound')).length;
-    } else {
-      const co = new Date(cutoffStr);
-      unreadCounts[c.num] = msgs.filter(
-        (m) => !m.direction.startsWith('outbound') && new Date(m.date_sent || m.date_created) > co
-      ).length;
-    }
-  });
-  updateDocumentTitleUnread();
-}
-
-function updateDocumentTitleUnread() {
-  let t = 0;
-  Object.values(unreadCounts).forEach((n) => {
-    t += n;
-  });
-  document.title = t > 0 ? `(${t > 99 ? '99+' : t}) ${DOC_TITLE}` : DOC_TITLE;
-}
-
-async function loadReadStates() {
-  if (!currentModel || !getUserId()) return;
-  const userId = getUserId();
-  const data = await sbGet('/rest/v1/read_state', {
-    select: 'contact_num,updated_at',
-    user_id: 'eq.' + userId,
-    model_id: 'eq.' + currentModel.id
-  });
-  const dbMap = {};
-  if (Array.isArray(data)) data.forEach((r) => { dbMap[r.contact_num] = r.updated_at; });
-  lastReadDb = dbMap;
-  syncUnreadFromCache();
-}
-
-function markAsRead(contactNum) {
-  if (!currentModel || !currentUser) return;
-  const now = new Date().toISOString();
-  unreadCounts[contactNum] = 0;
-  pendingReadTime[contactNum] = now;
-  lastReadDb[contactNum] = now;
-  renderChatList();
-  updateDocumentTitleUnread();
-  const userId = getUserId();
-  fetch(SUPABASE_URL + '/rest/v1/read_state', {
-    method: 'POST',
-    headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({ user_id: userId, model_id: currentModel.id, contact_num: contactNum, updated_at: now })
-  }).catch((e) => console.warn('markAsRead:', e));
-}
-
-function startBadgeSyncer() {
-  if (badgeSyncInterval) clearInterval(badgeSyncInterval);
-  badgeSyncInterval = setInterval(async () => {
-    await loadReadStates();
-    renderChatList();
-  }, 3000);
-}
-
-function stopBadgeSyncer() {
-  if (badgeSyncInterval) {
-    clearInterval(badgeSyncInterval);
-    badgeSyncInterval = null;
-  }
 }
 
 async function loadModels() {
@@ -614,8 +524,6 @@ async function selectModel(m) {
 function goToModels() {
   stopAllPollers();
   contacts = []; activeIdx = -1; lastSids = {}; chatCache = {};
-  unreadCounts = {}; pendingReadTime = {}; lastReadDb = {};
-  document.title = DOC_TITLE;
   document.getElementById('app').classList.remove('visible');
   document.getElementById('chat-view').style.display = 'none';
   document.getElementById('empty-state').style.display = 'flex';
@@ -690,7 +598,6 @@ async function initChat() {
     const msgs = chatCache[c.num] || [];
     lastSids[i] = new Set(msgs.map(m => m.sid));
   });
-  await loadReadStates();
   hideLoading();
   renderChatList();
   startAllPollers();
@@ -714,26 +621,17 @@ function renderChatList() {
   contacts.forEach((c, i) => {
     if (q && !c.name.toLowerCase().includes(q) && !c.num.includes(q)) return;
     const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
-    const unread = unreadCounts[c.num] || 0;
-    const previewText = (c.lastMsg || 'No messages yet').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const previewClass = unread > 0 ? 'chat-item-preview chat-item-preview-unread' : 'chat-item-preview';
-    const badgeLabel = formatUnreadBadge(unread);
-    const badgeWide = unread > 9 ? ' tg-unread-badge--compact' : '';
-    const badgeHtml = unread > 0 ? `<span class="tg-unread-badge${badgeWide}">${badgeLabel}</span>` : '';
     const div = document.createElement('div');
     div.className = 'chat-item' + (i === activeIdx ? ' active' : '');
     div.onclick = () => openChat(i).catch(console.error);
     div.innerHTML = `
       <div class="chat-avatar" style="background:${colorFor(i)}">${initials(c.name, c.num)}</div>
-      <div class="chat-item-body">
-        <div class="chat-item-row1">
+      <div class="chat-item-info">
+        <div class="chat-item-top">
           <span class="chat-item-name">${c.name||c.num}</span>
           <span class="chat-item-time">${time}</span>
         </div>
-        <div class="chat-item-preview-row">
-          <span class="${previewClass}">${previewText}</span>
-          ${badgeHtml}
-        </div>
+        <div class="chat-item-preview">${c.lastMsg||'No messages yet'}</div>
       </div>
       <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat(${i})">Delete</button>`;
     list.appendChild(div);
@@ -749,7 +647,6 @@ async function openChat(idx) {
   const c = contacts[idx];
   const allMsgs = chatCache[c.num] || [];
 
-  markAsRead(c.num);
   document.getElementById('empty-state').style.display = 'none';
   const cv = document.getElementById('chat-view');
   cv.style.display = 'flex'; cv.style.flexDirection = 'column'; cv.style.flex = '1'; cv.style.minHeight = '0';
@@ -769,11 +666,10 @@ function renderMessages(idx, msgs) {
   const area = document.getElementById('messages');
   area.innerHTML = '';
   lastSids[idx] = new Set(msgs.map(m => m.sid));
-    if (contacts[idx]) {
+  if (contacts[idx]) {
     const last = msgs[msgs.length-1];
     if (last) { contacts[idx].lastMsg = (last.direction.startsWith('outbound')?'You: ':'')+(last.body||'').slice(0,40); contacts[idx].lastTime = last.date_sent||last.date_created; }
   }
-  syncUnreadFromCache();
   renderChatList();
   msgs.forEach(m => appendMessageToDOM(area, m, idx));
 }
@@ -867,24 +763,20 @@ async function fetchAndCacheContact(idx) {
     contacts[idx].lastTime = last.date_sent||last.date_created;
     saveContactToDB(contacts[idx]);
     if (activeIdx !== idx) {
-      syncUnreadFromCache();
       renderChatList();
       return;
     }
     const area = document.getElementById('messages');
     let added = false;
     newMsgs.forEach(m => { if (area.querySelector(`[data-sid="${m.sid}"]`)) return; appendMessageToDOM(area, m, idx); added = true; });
-    if (added) {
-      area.scrollTop = area.scrollHeight;
-      markAsRead(c.num);
-    }
+    if (added) area.scrollTop = area.scrollHeight;
     renderChatList();
   } catch(e) {} finally { isFetching[idx] = false; }
 }
 
 function startPoller(idx) { if (intervals[idx]) clearInterval(intervals[idx]); intervals[idx] = setInterval(() => fetchAndCacheContact(idx), 1000); }
-function startAllPollers() { stopAllPollers(); contacts.forEach((_,i) => startPoller(i)); startBadgeSyncer(); }
-function stopAllPollers() { Object.values(intervals).forEach(clearInterval); intervals = {}; if (inboundCheckInterval) { clearInterval(inboundCheckInterval); inboundCheckInterval = null; } stopBadgeSyncer(); }
+function startAllPollers() { stopAllPollers(); contacts.forEach((_,i) => startPoller(i)); }
+function stopAllPollers() { Object.values(intervals).forEach(clearInterval); intervals = {}; if (inboundCheckInterval) { clearInterval(inboundCheckInterval); inboundCheckInterval = null; } }
 
 // ── INBOUND CHECKER ──
 async function checkForNewSenders() {
@@ -930,15 +822,11 @@ async function deleteChat(idx) {
   if (!confirm('Delete this conversation?')) return;
   if (intervals[idx]) clearInterval(intervals[idx]);
   const c = contacts[idx];
-  delete unreadCounts[c.num];
-  delete pendingReadTime[c.num];
-  delete lastReadDb[c.num];
   if (c.id) await deleteContactFromDB(c.id);
   await sbDelete(`/rest/v1/messages_cache?contact_num=eq.${encodeURIComponent(c.num)}&model_id=eq.${currentModel.id}`);
   contacts.splice(idx,1);
   if (activeIdx===idx) { activeIdx=-1; document.getElementById('chat-view').style.display='none'; document.getElementById('empty-state').style.display='flex'; }
   else if (activeIdx>idx) activeIdx--;
-  syncUnreadFromCache();
   renderChatList(); startAllPollers();
 }
 function deleteCurrentChat() { if (activeIdx>=0) deleteChat(activeIdx); }
