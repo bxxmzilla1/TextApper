@@ -107,10 +107,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .chat-item-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
 .chat-item-time { font-size: 11px; color: #636366; flex-shrink: 0; }
 .chat-item-preview { font-size: 12px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-.unread-badge { background: #2563eb; color: #fff; font-size: 11px; font-weight: 700; border-radius: 10px; padding: 2px 7px; min-width: 20px; text-align: center; flex-shrink: 0; }
 .chat-item-delete { display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #ff453a; border: none; color: #fff; border-radius: 7px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
 .chat-item:hover .chat-item-delete { display: block; }
-.chat-item:hover .unread-badge { display: none; }
 .chat-item:hover .chat-item-time { visibility: hidden; }
 .add-chat-btn { margin: 10px; padding: 10px; background: #2c2c2e; border: none; border-radius: 10px; color: #2563eb; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
 .add-chat-btn:hover { background: #3a3a3c; }
@@ -436,64 +434,6 @@ function getAccessToken() {
   return currentUser?.access_token || null;
 }
 
-// ── NOTIFICATION BADGE SYSTEM ──
-// Uses a timestamp (last_read_at) stored in updated_at column.
-// Unread = inbound messages with date_sent strictly after last_read_at.
-// This avoids SID-based race conditions where cached messages arrive after markAsRead fires.
-let unreadCounts = {};      // contactNum -> number
-let pendingReadTime = {};   // contactNum -> ISO timestamp written but not yet confirmed by DB
-
-async function loadReadStates() {
-  const userId = getUserId();
-  const data = await sbGet('/rest/v1/read_state', {
-    select: 'contact_num,updated_at',
-    user_id: 'eq.' + userId,
-    model_id: 'eq.' + currentModel.id
-  });
-  const dbMap = {};
-  if (Array.isArray(data)) data.forEach(r => { dbMap[r.contact_num] = r.updated_at; });
-  contacts.forEach(c => {
-    // Use in-memory pending timestamp until DB confirms (prevents badge flickering back)
-    const dbTime = dbMap[c.num] || null;
-    const lastReadAt = pendingReadTime[c.num] !== undefined ? pendingReadTime[c.num] : dbTime;
-    // Once DB has caught up, clear the pending entry
-    if (pendingReadTime[c.num] !== undefined && dbTime >= pendingReadTime[c.num]) delete pendingReadTime[c.num];
-    const msgs = chatCache[c.num] || [];
-    if (!lastReadAt) {
-      unreadCounts[c.num] = 0; // Never opened — treat as all read; badge appears only for new arrivals
-    } else {
-      unreadCounts[c.num] = msgs.filter(m =>
-        !m.direction.startsWith('outbound') &&
-        new Date(m.date_sent || m.date_created) > new Date(lastReadAt)
-      ).length;
-    }
-  });
-}
-
-function markAsRead(contactNum) {
-  if (!currentModel || !currentUser) return;
-  const now = new Date().toISOString();
-  unreadCounts[contactNum] = 0;
-  pendingReadTime[contactNum] = now;
-  renderChatList();
-  const userId = getUserId();
-  fetch(SUPABASE_URL + '/rest/v1/read_state', {
-    method: 'POST',
-    headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({ user_id: userId, model_id: currentModel.id, contact_num: contactNum, updated_at: now })
-  }).catch(e => console.warn('markAsRead:', e));
-}
-
-let badgeSyncInterval = null;
-function startBadgeSyncer() {
-  if (badgeSyncInterval) clearInterval(badgeSyncInterval);
-  badgeSyncInterval = setInterval(async () => {
-    await loadReadStates();
-    renderChatList();
-  }, 3000);
-}
-function stopBadgeSyncer() { if (badgeSyncInterval) { clearInterval(badgeSyncInterval); badgeSyncInterval = null; } }
-
 async function loadModels() {
   const userId = getUserId();
   const data = await sbGet('/rest/v1/models', { select: '*', user_id: 'eq.' + userId, order: 'created_at.asc' });
@@ -583,7 +523,7 @@ async function selectModel(m) {
 }
 function goToModels() {
   stopAllPollers();
-  contacts = []; activeIdx = -1; lastSids = {}; chatCache = {}; unreadCounts = {}; lastReadSids = {};
+  contacts = []; activeIdx = -1; lastSids = {}; chatCache = {};
   document.getElementById('app').classList.remove('visible');
   document.getElementById('chat-view').style.display = 'none';
   document.getElementById('empty-state').style.display = 'flex';
@@ -658,7 +598,6 @@ async function initChat() {
     const msgs = chatCache[c.num] || [];
     lastSids[i] = new Set(msgs.map(m => m.sid));
   });
-  await loadReadStates();
   hideLoading();
   renderChatList();
   startAllPollers();
@@ -694,7 +633,6 @@ function renderChatList() {
         </div>
         <div class="chat-item-preview">${c.lastMsg||'No messages yet'}</div>
       </div>
-      ${(unreadCounts[c.num] || 0) > 0 ? `<span class="unread-badge">${unreadCounts[c.num]}</span>` : ''}
       <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat(${i})">Delete</button>`;
     list.appendChild(div);
   });
@@ -709,8 +647,6 @@ async function openChat(idx) {
   const c = contacts[idx];
   const allMsgs = chatCache[c.num] || [];
 
-  // Mark as read instantly — updates memory + badge + saves to DB in background
-  markAsRead(c.num);
   document.getElementById('empty-state').style.display = 'none';
   const cv = document.getElementById('chat-view');
   cv.style.display = 'flex'; cv.style.flexDirection = 'column'; cv.style.flex = '1'; cv.style.minHeight = '0';
@@ -833,17 +769,14 @@ async function fetchAndCacheContact(idx) {
     const area = document.getElementById('messages');
     let added = false;
     newMsgs.forEach(m => { if (area.querySelector(`[data-sid="${m.sid}"]`)) return; appendMessageToDOM(area, m, idx); added = true; });
-    if (added) {
-      area.scrollTop = area.scrollHeight;
-      markAsRead(c.num);
-    }
+    if (added) area.scrollTop = area.scrollHeight;
     renderChatList();
   } catch(e) {} finally { isFetching[idx] = false; }
 }
 
 function startPoller(idx) { if (intervals[idx]) clearInterval(intervals[idx]); intervals[idx] = setInterval(() => fetchAndCacheContact(idx), 1000); }
-function startAllPollers() { stopAllPollers(); contacts.forEach((_,i) => startPoller(i)); startBadgeSyncer(); }
-function stopAllPollers() { Object.values(intervals).forEach(clearInterval); intervals = {}; if (inboundCheckInterval) { clearInterval(inboundCheckInterval); inboundCheckInterval = null; } stopBadgeSyncer(); }
+function startAllPollers() { stopAllPollers(); contacts.forEach((_,i) => startPoller(i)); }
+function stopAllPollers() { Object.values(intervals).forEach(clearInterval); intervals = {}; if (inboundCheckInterval) { clearInterval(inboundCheckInterval); inboundCheckInterval = null; } }
 
 // ── INBOUND CHECKER ──
 async function checkForNewSenders() {
