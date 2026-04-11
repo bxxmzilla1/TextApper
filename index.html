@@ -2,17 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<meta name="theme-color" content="#0d0d0f"/>
-<meta name="description" content="SMS dashboard for Twilio conversations"/>
-<meta name="mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="Messages"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Messages</title>
-<link rel="manifest" href="/manifest.webmanifest"/>
-<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png"/>
-<link rel="apple-touch-icon" href="/icons/icon-192.png"/>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d0f; height: 100vh; overflow: hidden; display: flex; color: #fff; }
@@ -107,8 +98,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .chat-item-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
 .chat-item-time { font-size: 11px; color: #636366; flex-shrink: 0; }
 .chat-item-preview { font-size: 12px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.unread-badge { background: #2563eb; color: #fff; font-size: 11px; font-weight: 700; border-radius: 10px; padding: 2px 7px; min-width: 20px; text-align: center; flex-shrink: 0; }
 .chat-item-delete { display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #ff453a; border: none; color: #fff; border-radius: 7px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
 .chat-item:hover .chat-item-delete { display: block; }
+.chat-item:hover .unread-badge { display: none; }
 .chat-item:hover .chat-item-time { visibility: hidden; }
 .add-chat-btn { margin: 10px; padding: 10px; background: #2c2c2e; border: none; border-radius: 10px; color: #2563eb; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
 .add-chat-btn:hover { background: #3a3a3c; }
@@ -434,6 +427,96 @@ function getAccessToken() {
   return currentUser?.access_token || null;
 }
 
+// ── Invisible read checkpoint (Supabase read_state) + notification badges ──
+// Nothing is drawn in the thread: we only persist where you read to. Each row stores
+// last_read_sid (message cursor) and updated_at (time cursor). If the SID is no longer
+// in the 50-message cache, updated_at still positions the checkpoint for badge counts.
+let checkpoints = {}; // contactNum -> { lastSid, readAt }
+
+async function loadCheckpoints() {
+  const userId = getUserId();
+  if (!currentModel || !userId) return;
+  const data = await sbGet('/rest/v1/read_state', {
+    select: 'contact_num,last_read_sid,updated_at',
+    user_id: 'eq.' + userId,
+    model_id: 'eq.' + currentModel.id
+  });
+  checkpoints = {};
+  if (Array.isArray(data)) {
+    data.forEach((r) => {
+      checkpoints[r.contact_num] = { lastSid: r.last_read_sid || null, readAt: r.updated_at || null };
+    });
+  }
+}
+
+function saveCheckpoint(contactNum, lastSid, readAt) {
+  const at = readAt || new Date().toISOString();
+  checkpoints[contactNum] = { lastSid: lastSid || null, readAt: at };
+  const userId = getUserId();
+  fetch(SUPABASE_URL + '/rest/v1/read_state', {
+    method: 'POST',
+    headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      user_id: userId,
+      model_id: currentModel.id,
+      contact_num: contactNum,
+      last_read_sid: lastSid || null,
+      unread_count: 0,
+      updated_at: at
+    })
+  }).catch((e) => console.warn('saveCheckpoint:', e));
+}
+
+function computeUnread(contactNum) {
+  const msgs = chatCache[contactNum] || [];
+  if (!msgs.length) return 0;
+  const cp = checkpoints[contactNum];
+  if (!cp || (!cp.lastSid && !cp.readAt)) {
+    return msgs.filter((m) => !m.direction.startsWith('outbound')).length;
+  }
+  if (cp.lastSid) {
+    const cpIdx = msgs.findIndex((m) => m.sid === cp.lastSid);
+    if (cpIdx !== -1) {
+      return msgs.slice(cpIdx + 1).filter((m) => !m.direction.startsWith('outbound')).length;
+    }
+  }
+  if (cp.readAt) {
+    const t = new Date(cp.readAt);
+    return msgs.filter(
+      (m) => !m.direction.startsWith('outbound') && new Date(m.date_sent || m.date_created) > t
+    ).length;
+  }
+  return msgs.filter((m) => !m.direction.startsWith('outbound')).length;
+}
+
+function getUnreadCount(contactNum) {
+  if (activeIdx >= 0 && contacts[activeIdx] && contacts[activeIdx].num === contactNum) return 0;
+  return computeUnread(contactNum);
+}
+
+function markContactAsRead(contactNum) {
+  const msgs = chatCache[contactNum] || [];
+  const lastSid = msgs.length ? msgs[msgs.length - 1].sid : null;
+  const readAt = new Date().toISOString();
+  checkpoints[contactNum] = { lastSid, readAt };
+  saveCheckpoint(contactNum, lastSid, readAt);
+  renderChatList();
+}
+
+function upsertReadState(contactNum, sid) {
+  const readAt = new Date().toISOString();
+  checkpoints[contactNum] = { lastSid: sid || null, readAt };
+  saveCheckpoint(contactNum, sid || null, readAt);
+}
+
+async function refreshBadgesFromDB() {
+  if (!currentModel || !getUserId()) return;
+  await loadCheckpoints();
+  renderChatList();
+}
+
+const loadAllReadStates = loadCheckpoints;
+
 async function loadModels() {
   const userId = getUserId();
   const data = await sbGet('/rest/v1/models', { select: '*', user_id: 'eq.' + userId, order: 'created_at.asc' });
@@ -523,7 +606,7 @@ async function selectModel(m) {
 }
 function goToModels() {
   stopAllPollers();
-  contacts = []; activeIdx = -1; lastSids = {}; chatCache = {};
+  contacts = []; activeIdx = -1; lastSids = {}; chatCache = {}; checkpoints = {};
   document.getElementById('app').classList.remove('visible');
   document.getElementById('chat-view').style.display = 'none';
   document.getElementById('empty-state').style.display = 'flex';
@@ -598,6 +681,8 @@ async function initChat() {
     const msgs = chatCache[c.num] || [];
     lastSids[i] = new Set(msgs.map(m => m.sid));
   });
+  // Load all read states fresh from Supabase — this is the single source of truth
+  await loadAllReadStates();
   hideLoading();
   renderChatList();
   startAllPollers();
@@ -620,7 +705,9 @@ function renderChatList() {
   list.innerHTML = '';
   contacts.forEach((c, i) => {
     if (q && !c.name.toLowerCase().includes(q) && !c.num.includes(q)) return;
+    const unreadN = getUnreadCount(c.num);
     const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
+    const previewEsc = (c.lastMsg || 'No messages yet').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const div = document.createElement('div');
     div.className = 'chat-item' + (i === activeIdx ? ' active' : '');
     div.onclick = () => openChat(i).catch(console.error);
@@ -631,8 +718,9 @@ function renderChatList() {
           <span class="chat-item-name">${c.name||c.num}</span>
           <span class="chat-item-time">${time}</span>
         </div>
-        <div class="chat-item-preview">${c.lastMsg||'No messages yet'}</div>
+        <div class="chat-item-preview">${previewEsc}</div>
       </div>
+      ${unreadN > 0 ? `<span class="unread-badge">${unreadN > 99 ? '99+' : unreadN}</span>` : ''}
       <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat(${i})">Delete</button>`;
     list.appendChild(div);
   });
@@ -647,6 +735,8 @@ async function openChat(idx) {
   const c = contacts[idx];
   const allMsgs = chatCache[c.num] || [];
 
+  // Mark as read instantly — updates memory + badge + saves to DB in background
+  markContactAsRead(c.num);
   document.getElementById('empty-state').style.display = 'none';
   const cv = document.getElementById('chat-view');
   cv.style.display = 'flex'; cv.style.flexDirection = 'column'; cv.style.flex = '1'; cv.style.minHeight = '0';
@@ -769,14 +859,25 @@ async function fetchAndCacheContact(idx) {
     const area = document.getElementById('messages');
     let added = false;
     newMsgs.forEach(m => { if (area.querySelector(`[data-sid="${m.sid}"]`)) return; appendMessageToDOM(area, m, idx); added = true; });
-    if (added) area.scrollTop = area.scrollHeight;
+    if (added) {
+      area.scrollTop = area.scrollHeight;
+      markContactAsRead(c.num);
+    }
     renderChatList();
   } catch(e) {} finally { isFetching[idx] = false; }
 }
 
 function startPoller(idx) { if (intervals[idx]) clearInterval(intervals[idx]); intervals[idx] = setInterval(() => fetchAndCacheContact(idx), 1000); }
-function startAllPollers() { stopAllPollers(); contacts.forEach((_,i) => startPoller(i)); }
-function stopAllPollers() { Object.values(intervals).forEach(clearInterval); intervals = {}; if (inboundCheckInterval) { clearInterval(inboundCheckInterval); inboundCheckInterval = null; } }
+function startAllPollers() { stopAllPollers(); contacts.forEach((_,i) => startPoller(i)); startReadStateSyncer(); }
+function stopAllPollers() { Object.values(intervals).forEach(clearInterval); intervals = {}; if (inboundCheckInterval) { clearInterval(inboundCheckInterval); inboundCheckInterval = null; } if (readStateSyncInterval) { clearInterval(readStateSyncInterval); readStateSyncInterval = null; } }
+
+let readStateSyncInterval = null;
+
+function startReadStateSyncer() {
+  if (readStateSyncInterval) clearInterval(readStateSyncInterval);
+  // Refresh badges from Supabase every 3 seconds
+  readStateSyncInterval = setInterval(refreshBadgesFromDB, 3000);
+}
 
 // ── INBOUND CHECKER ──
 async function checkForNewSenders() {
@@ -822,6 +923,7 @@ async function deleteChat(idx) {
   if (!confirm('Delete this conversation?')) return;
   if (intervals[idx]) clearInterval(intervals[idx]);
   const c = contacts[idx];
+  delete checkpoints[c.num];
   if (c.id) await deleteContactFromDB(c.id);
   await sbDelete(`/rest/v1/messages_cache?contact_num=eq.${encodeURIComponent(c.num)}&model_id=eq.${currentModel.id}`);
   contacts.splice(idx,1);
@@ -855,6 +957,8 @@ async function sendMsg() {
     lastSids[activeIdx].add(d.sid);
     if (chatCache[c.num]) chatCache[c.num].push(optMsg);
     cacheSingleMessage(c.num, optMsg);
+    // Mark sent message as read so it never triggers a badge
+    await upsertReadState(c.num, d.sid);
     area.scrollTop = area.scrollHeight;
   } catch(e) {}
 }
@@ -946,9 +1050,6 @@ document.getElementById('messages').addEventListener('scroll', () => { if(active
 
 // ── INIT ──
 (async function() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
-  }
   // supabase-js handles session persistence & auto-refresh automatically
   const { data: { session } } = await _sb.auth.getSession();
 
