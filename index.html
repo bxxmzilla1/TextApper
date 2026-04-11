@@ -440,31 +440,63 @@ async function loadCheckpoints() {
     select: 'contact_num,last_read_sid,updated_at',
     user_id: 'eq.' + userId,
     model_id: 'eq.' + currentModel.id
-  });
+  }, currentUser?.access_token);
+  if (!Array.isArray(data)) return;
+  const prev = { ...checkpoints };
   checkpoints = {};
-  if (Array.isArray(data)) {
-    data.forEach((r) => {
-      checkpoints[r.contact_num] = { lastSid: r.last_read_sid || null, readAt: r.updated_at || null };
-    });
-  }
+  const contactNums = new Set(contacts.map((c) => c.num));
+  const rowByContact = new Map();
+  data.forEach((r) => {
+    const ex = rowByContact.get(r.contact_num);
+    if (!ex || new Date(r.updated_at || 0) > new Date(ex.updated_at || 0)) rowByContact.set(r.contact_num, r);
+  });
+  rowByContact.forEach((r, contactNum) => {
+    const incoming = { lastSid: r.last_read_sid || null, readAt: r.updated_at || null };
+    const local = prev[contactNum];
+    if (local && local.readAt && incoming.readAt && new Date(local.readAt) > new Date(incoming.readAt)) {
+      checkpoints[contactNum] = local;
+    } else if (local && local.readAt && !incoming.readAt) {
+      checkpoints[contactNum] = local;
+    } else {
+      checkpoints[contactNum] = incoming;
+    }
+  });
+  Object.keys(prev).forEach((num) => {
+    if (!contactNums.has(num) || checkpoints[num] !== undefined) return;
+    checkpoints[num] = prev[num];
+  });
 }
 
-function saveCheckpoint(contactNum, lastSid, readAt) {
+async function saveCheckpoint(contactNum, lastSid, readAt) {
   const at = readAt || new Date().toISOString();
   checkpoints[contactNum] = { lastSid: lastSid || null, readAt: at };
   const userId = getUserId();
-  fetch(SUPABASE_URL + '/rest/v1/read_state', {
-    method: 'POST',
-    headers: { ...sbHeaders(), 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({
-      user_id: userId,
-      model_id: currentModel.id,
-      contact_num: contactNum,
-      last_read_sid: lastSid || null,
-      unread_count: 0,
-      updated_at: at
-    })
-  }).catch((e) => console.warn('saveCheckpoint:', e));
+  const token = currentUser?.access_token;
+  const body = {
+    user_id: userId,
+    model_id: currentModel.id,
+    contact_num: contactNum,
+    last_read_sid: lastSid || null,
+    unread_count: 0,
+    updated_at: at
+  };
+  try {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/read_state', {
+      method: 'POST',
+      headers: {
+        ...sbHeaders(token),
+        Prefer: 'resolution=merge-duplicates,return=representation'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn('saveCheckpoint failed:', res.status, errText);
+      return;
+    }
+  } catch (e) {
+    console.warn('saveCheckpoint:', e);
+  }
 }
 
 function computeUnread(contactNum) {
@@ -494,19 +526,19 @@ function getUnreadCount(contactNum) {
   return computeUnread(contactNum);
 }
 
-function markContactAsRead(contactNum) {
+async function markContactAsRead(contactNum) {
   const msgs = chatCache[contactNum] || [];
   const lastSid = msgs.length ? msgs[msgs.length - 1].sid : null;
   const readAt = new Date().toISOString();
   checkpoints[contactNum] = { lastSid, readAt };
-  saveCheckpoint(contactNum, lastSid, readAt);
+  await saveCheckpoint(contactNum, lastSid, readAt);
   renderChatList();
 }
 
-function upsertReadState(contactNum, sid) {
+async function upsertReadState(contactNum, sid) {
   const readAt = new Date().toISOString();
   checkpoints[contactNum] = { lastSid: sid || null, readAt };
-  saveCheckpoint(contactNum, sid || null, readAt);
+  await saveCheckpoint(contactNum, sid || null, readAt);
 }
 
 async function refreshBadgesFromDB() {
@@ -735,8 +767,6 @@ async function openChat(idx) {
   const c = contacts[idx];
   const allMsgs = chatCache[c.num] || [];
 
-  // Mark as read instantly — updates memory + badge + saves to DB in background
-  markContactAsRead(c.num);
   document.getElementById('empty-state').style.display = 'none';
   const cv = document.getElementById('chat-view');
   cv.style.display = 'flex'; cv.style.flexDirection = 'column'; cv.style.flex = '1'; cv.style.minHeight = '0';
@@ -748,6 +778,7 @@ async function openChat(idx) {
   renderMessages(idx, allMsgs);
   if (scrollPositions[idx] !== undefined) area.scrollTop = scrollPositions[idx];
   else area.scrollTop = area.scrollHeight;
+  await markContactAsRead(c.num);
   renderChatList();
 }
 
@@ -861,7 +892,7 @@ async function fetchAndCacheContact(idx) {
     newMsgs.forEach(m => { if (area.querySelector(`[data-sid="${m.sid}"]`)) return; appendMessageToDOM(area, m, idx); added = true; });
     if (added) {
       area.scrollTop = area.scrollHeight;
-      markContactAsRead(c.num);
+      await markContactAsRead(c.num);
     }
     renderChatList();
   } catch(e) {} finally { isFetching[idx] = false; }
