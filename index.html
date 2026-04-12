@@ -384,6 +384,8 @@ let pendingMediaUrl = null;
 let editingModelId = null;
 let inboundCheckInterval = null;
 let isFetching = {};
+let needsReplySeenThroughSid = {};
+let needsReplyPreviewOpened = {};
 const COLORS = ['#e74c8b','#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#a855f7'];
 function colorFor(i) { return COLORS[i % COLORS.length]; }
 
@@ -405,7 +407,12 @@ async function sbPost(path, body, token, prefer) {
   return r.json();
 }
 async function sbDelete(path, token) {
-  await fetch(SUPABASE_URL + path, { method: 'DELETE', headers: sbHeaders(token) });
+  const r = await fetch(SUPABASE_URL + path, { method: 'DELETE', headers: sbHeaders(token) });
+  if (!r.ok) {
+    const t = await r.text();
+    console.warn('DELETE failed', path, r.status, t);
+  }
+  return r.ok;
 }
 function proxyUrl(path) { return PROXY + '?path=' + encodeURIComponent(path); }
 function initials(name, num) { if (name) return name.slice(0,2).toUpperCase(); return (num||'').replace(/\D/g,'').slice(-2); }
@@ -536,7 +543,7 @@ async function saveModel() {
 }
 async function deleteModel(id) {
   if (!confirm('Delete this model and all its contacts?')) return;
-  await sbDelete('/rest/v1/models?id=eq.' + id);
+  await sbDelete('/rest/v1/models?id=eq.' + id, currentUser?.access_token);
   await loadModels();
   renderModels();
   if (currentModel?.id === id) { currentModel = null; goToModels(); }
@@ -556,6 +563,8 @@ async function selectModel(m) {
 function goToModels() {
   stopAllPollers();
   contacts = []; activeIdx = -1; lastSids = {}; chatCache = {};
+  needsReplySeenThroughSid = {};
+  needsReplyPreviewOpened = {};
   document.getElementById('app').classList.remove('chat-open');
   document.getElementById('app').classList.remove('visible');
   document.getElementById('chat-view').style.display = 'none';
@@ -590,7 +599,7 @@ async function saveContactToDB(c) {
   return Array.isArray(data) && data[0] ? data[0].id : c.id;
 }
 async function deleteContactFromDB(id) {
-  await sbDelete('/rest/v1/contacts?id=eq.' + id);
+  await sbDelete('/rest/v1/contacts?id=eq.' + encodeURIComponent(id), currentUser?.access_token);
 }
 
 // ── MESSAGES CACHE ──
@@ -652,15 +661,29 @@ function isOutboundDirection(dir) {
   return !!(dir && dir.startsWith('outbound'));
 }
 
+function markNeedsReplySeen(contactNum) {
+  const msgs = chatCache[contactNum] || [];
+  if (msgs.length) {
+    needsReplySeenThroughSid[contactNum] = msgs[msgs.length - 1].sid;
+    delete needsReplyPreviewOpened[contactNum];
+  } else {
+    delete needsReplySeenThroughSid[contactNum];
+    needsReplyPreviewOpened[contactNum] = true;
+  }
+}
+
 function contactAwaitingOurReply(c) {
   const msgs = chatCache[c.num] || [];
   if (msgs.length) {
     const last = msgs[msgs.length - 1];
-    return !isOutboundDirection(last.direction);
+    if (isOutboundDirection(last.direction)) return false;
+    return needsReplySeenThroughSid[c.num] !== last.sid;
   }
   const preview = (c.lastMsg || '').trim();
   if (!preview || preview === 'No messages yet') return false;
-  return !preview.startsWith('You: ');
+  if (preview.startsWith('You: ')) return false;
+  if (needsReplyPreviewOpened[c.num]) return false;
+  return true;
 }
 
 // ── RENDER CHAT LIST ──
@@ -728,7 +751,9 @@ async function openChat(idx) {
   renderMessages(idx, allMsgs);
   if (scrollPositions[idx] !== undefined) area.scrollTop = scrollPositions[idx];
   else area.scrollTop = area.scrollHeight;
+  markNeedsReplySeen(c.num);
   syncMobileChatPanel();
+  renderChatList();
 }
 
 // ── RENDER MESSAGES (initial load only) ──
@@ -839,7 +864,10 @@ async function fetchAndCacheContact(idx) {
     const area = document.getElementById('messages');
     let added = false;
     newMsgs.forEach(m => { if (area.querySelector(`[data-sid="${m.sid}"]`)) return; appendMessageToDOM(area, m, idx); added = true; });
-    if (added) area.scrollTop = area.scrollHeight;
+    if (added) {
+      area.scrollTop = area.scrollHeight;
+      if (activeIdx === idx) markNeedsReplySeen(c.num);
+    }
     renderChatList();
   } catch(e) {} finally { isFetching[idx] = false; }
 }
@@ -892,8 +920,15 @@ async function deleteChat(idx) {
   if (!confirm('Delete this conversation?')) return;
   if (intervals[idx]) clearInterval(intervals[idx]);
   const c = contacts[idx];
+  const userId = getUserId();
+  const token = currentUser?.access_token;
   if (c.id) await deleteContactFromDB(c.id);
-  await sbDelete(`/rest/v1/messages_cache?contact_num=eq.${encodeURIComponent(c.num)}&model_id=eq.${currentModel.id}`);
+  const cacheFilter = `contact_num=eq.${encodeURIComponent(c.num)}&model_id=eq.${encodeURIComponent(currentModel.id)}&user_id=eq.${encodeURIComponent(userId)}`;
+  await sbDelete(`/rest/v1/messages_cache?${cacheFilter}`, token);
+  await sbDelete(`/rest/v1/read_state?${cacheFilter}`, token);
+  delete needsReplySeenThroughSid[c.num];
+  delete needsReplyPreviewOpened[c.num];
+  delete chatCache[c.num];
   contacts.splice(idx,1);
   if (activeIdx===idx) { activeIdx=-1; document.getElementById('chat-view').style.display='none'; document.getElementById('empty-state').style.display='flex'; }
   else if (activeIdx>idx) activeIdx--;
@@ -930,6 +965,7 @@ async function sendMsg() {
     contacts[activeIdx].lastMsg = 'You: ' + previewBit;
     contacts[activeIdx].lastTime = optMsg.date_sent;
     saveContactToDB(contacts[activeIdx]);
+    markNeedsReplySeen(c.num);
     renderChatList();
     area.scrollTop = area.scrollHeight;
   } catch(e) {}
