@@ -92,6 +92,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .chat-item { display: flex; align-items: center; gap: 11px; padding: 11px 14px; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid #222224; position: relative; }
 .chat-item:hover { background: #252527; }
 .chat-item.active { background: #2c2c2e; }
+.chat-item.needs-reply { box-shadow: inset 3px 0 0 #3390ec; background: rgba(51, 144, 236, 0.09); }
+.chat-item.needs-reply:hover { background: rgba(51, 144, 236, 0.15); }
+.chat-item.needs-reply.active { background: rgba(51, 144, 236, 0.12); }
 .chat-avatar { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; }
 .chat-item-info { flex: 1; min-width: 0; }
 .chat-item-top { display: flex; justify-content: space-between; align-items: baseline; }
@@ -604,6 +607,22 @@ async function preloadAllChats() {
   }
 }
 
+// ── Sidebar: highlight chats where the contact sent the last message (awaiting our reply) ──
+function isOutboundDirection(dir) {
+  return !!(dir && dir.startsWith('outbound'));
+}
+
+function contactAwaitingOurReply(c) {
+  const msgs = chatCache[c.num] || [];
+  if (msgs.length) {
+    const last = msgs[msgs.length - 1];
+    return !isOutboundDirection(last.direction);
+  }
+  const preview = (c.lastMsg || '').trim();
+  if (!preview || preview === 'No messages yet') return false;
+  return !preview.startsWith('You: ');
+}
+
 // ── RENDER CHAT LIST ──
 function renderChatList() {
   const q = (document.getElementById('search-input').value||'').toLowerCase();
@@ -614,7 +633,8 @@ function renderChatList() {
     const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
     const previewEsc = (c.lastMsg || 'No messages yet').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const div = document.createElement('div');
-    div.className = 'chat-item' + (i === activeIdx ? ' active' : '');
+    const needsReply = contactAwaitingOurReply(c);
+    div.className = 'chat-item' + (i === activeIdx ? ' active' : '') + (needsReply ? ' needs-reply' : '');
     div.onclick = () => openChat(i).catch(console.error);
     div.innerHTML = `
       <div class="chat-avatar" style="background:${colorFor(i)}">${initials(c.name, c.num)}</div>
@@ -846,6 +866,11 @@ async function sendMsg() {
     lastSids[activeIdx].add(d.sid);
     if (chatCache[c.num]) chatCache[c.num].push(optMsg);
     cacheSingleMessage(c.num, optMsg);
+    const previewBit = imgUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40);
+    contacts[activeIdx].lastMsg = 'You: ' + previewBit;
+    contacts[activeIdx].lastTime = optMsg.date_sent;
+    saveContactToDB(contacts[activeIdx]);
+    renderChatList();
     area.scrollTop = area.scrollHeight;
   } catch(e) {}
 }
