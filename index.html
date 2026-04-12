@@ -87,7 +87,26 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .search-wrap { margin-bottom: 0; }
 .search-wrap input { width: 100%; padding: 8px 12px; background: #2c2c2e; border: none; border-radius: 10px; color: #fff; font-size: 14px; outline: none; }
 .search-wrap input::placeholder { color: #48484a; }
-#chat-list { flex: 1; overflow-y: auto; }
+.sidebar-tabs { display: flex; gap: 4px; margin-top: 10px; }
+.sidebar-tab { flex: 1; padding: 8px; font-size: 13px; font-weight: 600; border: none; border-radius: 8px; background: #2c2c2e; color: #8e8e93; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.sidebar-tab:hover { color: #fff; }
+.sidebar-tab.active { background: #3a3a3c; color: #fff; }
+.group-back-bar { display: none; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #2c2c2e; flex-shrink: 0; background: #1c1c1e; }
+.group-back-bar.visible { display: flex; }
+.group-back-bar button { background: none; border: none; color: #3390ec; font-size: 18px; cursor: pointer; font-weight: 600; line-height: 1; padding: 4px 8px 4px 0; }
+.group-back-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-row { display: flex; align-items: center; gap: 11px; padding: 11px 14px; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid #222224; position: relative; padding-right: 72px; }
+.group-row:hover { background: #252527; }
+.group-row:hover .chat-item-delete { display: block; }
+.group-row .chat-item-delete { display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
+.group-item-meta { font-size: 12px; color: #8e8e93; margin-top: 2px; }
+.empty-side { padding: 20px 16px; text-align: center; color: #636366; font-size: 14px; }
+.group-member-picker { max-height: min(240px, 42vh); overflow-y: auto; background: #2c2c2e; border-radius: 10px; padding: 4px; margin-top: 4px; }
+.gmb-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.gmb-row:hover { background: #3a3a3c; }
+.gmb-row input { width: 18px; height: 18px; flex-shrink: 0; accent-color: #2563eb; }
+.modal-box-scroll { max-height: 85vh; display: flex; flex-direction: column; }
+#chat-list { flex: 1; overflow-y: auto; min-height: 0; }
 #chat-list::-webkit-scrollbar { width: 4px; }
 #chat-list::-webkit-scrollbar-thumb { background: #3a3a3c; border-radius: 4px; }
 .chat-item { display: flex; align-items: center; gap: 11px; padding: 11px 14px; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid #222224; position: relative; }
@@ -281,9 +300,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <div class="search-wrap">
         <input id="search-input" placeholder="Search contacts…" oninput="filterChats()"/>
       </div>
+      <div class="sidebar-tabs" role="tablist">
+        <button type="button" class="sidebar-tab active" id="tab-chats" onclick="setSidebarTab('chats')">Chats</button>
+        <button type="button" class="sidebar-tab" id="tab-groups" onclick="setSidebarTab('groups')">Groups</button>
+      </div>
     </div>
+    <div id="group-back-bar" class="group-back-bar" aria-hidden="true"></div>
     <div id="chat-list"></div>
-    <button class="add-chat-btn" onclick="openAddContactModal()">＋ New conversation</button>
+    <button type="button" class="add-chat-btn" id="sidebar-footer-btn" onclick="sidebarFooterClick()">＋ New conversation</button>
   </div>
   <div id="main">
     <div id="empty-state">
@@ -371,6 +395,22 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 </div>
 
+<!-- GROUP MODAL -->
+<div id="group-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:625;align-items:center;justify-content:center;padding:16px;">
+  <div class="modal-box modal-box-scroll">
+    <h3 id="group-modal-title">New group</h3>
+    <div class="field"><label>Group name</label><input id="group-name-input" placeholder="e.g. VIP fans" maxlength="80"/></div>
+    <div class="field" style="margin-bottom:0;"><label>Members</label>
+      <div id="group-members-checkboxes" class="group-member-picker"></div>
+    </div>
+    <p id="group-modal-hint" style="color:#636366;font-size:12px;margin-top:8px;">Choose contacts to include. You can change this anytime.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn-sec" onclick="closeGroupModal()">Cancel</button>
+      <button type="button" class="btn-primary" style="margin-top:0;" onclick="saveGroupFromModal()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- LIGHTBOX -->
 <div id="lightbox" onclick="closeLightbox()">
   <button id="lightbox-close" onclick="closeLightbox()">✕</button>
@@ -395,6 +435,10 @@ let currentUser = null;
 let currentModel = null;
 let models = [];
 let contacts = [];
+let contactGroups = [];
+let sidebarTab = 'chats';
+let expandedGroupId = null;
+let editingGroupId = null;
 let activeIdx = -1;
 let intervals = {};
 let lastSids = {};
@@ -462,7 +506,7 @@ async function saveNickname() {
   c.name = document.getElementById('nickname-input').value.trim();
   await saveContactToDB(c);
   updateChatHeaderUI(activeIdx);
-  renderChatList();
+  refreshSidebarList();
   closeNicknameModal();
 }
 function formatTime(d) { return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
@@ -611,12 +655,21 @@ async function selectModel(m) {
 }
 function goToModels() {
   stopAllPollers();
-  contacts = []; activeIdx = -1; lastSids = {}; chatCache = {};
+  contacts = []; contactGroups = []; activeIdx = -1; lastSids = {}; chatCache = {};
+  sidebarTab = 'chats'; expandedGroupId = null; editingGroupId = null;
   document.getElementById('app').classList.remove('chat-open');
   document.getElementById('app').classList.remove('visible');
   document.getElementById('chat-view').style.display = 'none';
   document.getElementById('empty-state').style.display = 'flex';
   document.getElementById('chat-list').innerHTML = '';
+  const tc = document.getElementById('tab-chats'), tg = document.getElementById('tab-groups');
+  if (tc) tc.classList.add('active');
+  if (tg) tg.classList.remove('active');
+  const si = document.getElementById('search-input');
+  if (si) { si.value = ''; si.placeholder = 'Search contacts…'; }
+  updateGroupBackBar();
+  const fb = document.getElementById('sidebar-footer-btn');
+  if (fb) fb.textContent = '＋ New conversation';
   document.getElementById('models-screen').classList.remove('hidden');
 }
 async function showModelsScreen() {
@@ -647,6 +700,247 @@ async function saveContactToDB(c) {
 }
 async function deleteContactFromDB(id) {
   await sbDelete('/rest/v1/contacts?id=eq.' + encodeURIComponent(id), currentUser?.access_token);
+}
+
+// ── CONTACT GROUPS (Supabase: contact_groups + contact_group_members) ──
+async function loadContactGroupsFromDB() {
+  contactGroups = [];
+  if (!currentModel) return;
+  const userId = getUserId();
+  const data = await sbGet('/rest/v1/contact_groups', {
+    select: '*',
+    model_id: 'eq.' + currentModel.id,
+    user_id: 'eq.' + userId,
+    order: 'created_at.asc'
+  });
+  if (!Array.isArray(data)) {
+    if (data && data.message) console.warn('contact_groups:', data.message);
+    return;
+  }
+  const groups = data.map(r => ({ id: r.id, name: r.name || '', memberIds: new Set() }));
+  if (!groups.length) {
+    contactGroups = groups;
+    return;
+  }
+  const idList = groups.map(g => g.id).join(',');
+  const mem = await sbGet('/rest/v1/contact_group_members', {
+    select: 'group_id,contact_id',
+    group_id: 'in.(' + idList + ')'
+  });
+  if (Array.isArray(mem)) {
+    mem.forEach(row => {
+      const g = groups.find(x => x.id === row.group_id);
+      if (g && row.contact_id) g.memberIds.add(row.contact_id);
+    });
+  }
+  contactGroups = groups;
+}
+
+async function deleteContactFromGroupMembersDB(contactId) {
+  if (!contactId) return;
+  await sbDelete('/rest/v1/contact_group_members?contact_id=eq.' + encodeURIComponent(contactId), currentUser?.access_token);
+}
+
+async function createGroupInDB(name) {
+  const userId = getUserId();
+  const r = await fetch(SUPABASE_URL + '/rest/v1/contact_groups', {
+    method: 'POST',
+    headers: { ...sbHeaders(currentUser.access_token), 'Prefer': 'return=representation' },
+    body: JSON.stringify({ name, model_id: currentModel.id, user_id: userId })
+  });
+  const data = await r.json();
+  return Array.isArray(data) && data[0] ? data[0].id : null;
+}
+
+async function updateGroupNameInDB(id, name) {
+  await fetch(SUPABASE_URL + '/rest/v1/contact_groups?id=eq.' + encodeURIComponent(id), {
+    method: 'PATCH',
+    headers: sbHeaders(currentUser.access_token),
+    body: JSON.stringify({ name })
+  });
+}
+
+async function saveGroupMembersToDB(groupId, contactIds) {
+  const token = currentUser?.access_token;
+  await sbDelete('/rest/v1/contact_group_members?group_id=eq.' + encodeURIComponent(groupId), token);
+  if (!contactIds.length) return;
+  const rows = contactIds.map(contact_id => ({ group_id: groupId, contact_id }));
+  await fetch(SUPABASE_URL + '/rest/v1/contact_group_members', {
+    method: 'POST',
+    headers: { ...sbHeaders(token), 'Prefer': 'return=minimal' },
+    body: JSON.stringify(rows)
+  });
+}
+
+async function deleteGroupFromDB(id) {
+  await sbDelete('/rest/v1/contact_groups?id=eq.' + encodeURIComponent(id), currentUser?.access_token);
+}
+
+function setSidebarTab(tab) {
+  sidebarTab = tab;
+  if (tab === 'chats') expandedGroupId = null;
+  const si = document.getElementById('search-input');
+  if (si) si.value = '';
+  document.getElementById('tab-chats').classList.toggle('active', tab === 'chats');
+  document.getElementById('tab-groups').classList.toggle('active', tab === 'groups');
+  if (si) {
+    if (tab === 'chats') si.placeholder = 'Search contacts…';
+    else if (expandedGroupId) si.placeholder = 'Search in group…';
+    else si.placeholder = 'Search groups…';
+  }
+  updateGroupBackBar();
+  updateSidebarFooterBtn();
+  refreshSidebarList();
+}
+
+function updateSidebarFooterBtn() {
+  const btn = document.getElementById('sidebar-footer-btn');
+  if (!btn) return;
+  if (sidebarTab === 'chats') btn.textContent = '＋ New conversation';
+  else if (expandedGroupId) btn.textContent = '✎ Edit group';
+  else btn.textContent = '＋ New group';
+}
+
+function updateGroupBackBar() {
+  const bar = document.getElementById('group-back-bar');
+  if (!bar) return;
+  if (sidebarTab === 'groups' && expandedGroupId) {
+    const g = contactGroups.find(x => x.id === expandedGroupId);
+    bar.classList.add('visible');
+    bar.setAttribute('aria-hidden', 'false');
+    bar.innerHTML = '<button type="button" onclick="closeExpandedGroup()" aria-label="Back to groups">←</button><span class="group-back-title"></span>';
+    const t = bar.querySelector('.group-back-title');
+    if (t) t.textContent = g ? g.name : 'Group';
+  } else {
+    bar.classList.remove('visible');
+    bar.setAttribute('aria-hidden', 'true');
+    bar.innerHTML = '';
+  }
+}
+
+function closeExpandedGroup() {
+  expandedGroupId = null;
+  const si = document.getElementById('search-input');
+  if (si && sidebarTab === 'groups') si.placeholder = 'Search groups…';
+  updateGroupBackBar();
+  updateSidebarFooterBtn();
+  refreshSidebarList();
+}
+
+function openExpandedGroup(gid) {
+  expandedGroupId = gid;
+  const si = document.getElementById('search-input');
+  if (si) {
+    si.value = '';
+    si.placeholder = 'Search in group…';
+  }
+  updateGroupBackBar();
+  updateSidebarFooterBtn();
+  refreshSidebarList();
+}
+
+function sidebarFooterClick() {
+  if (sidebarTab === 'chats') openAddContactModal();
+  else if (expandedGroupId) openGroupModal(expandedGroupId);
+  else openGroupModal(null);
+}
+
+function openGroupModal(gid) {
+  editingGroupId = gid || null;
+  document.getElementById('group-modal-title').textContent = gid ? 'Edit group' : 'New group';
+  document.getElementById('group-name-input').value = gid ? (contactGroups.find(x => x.id === gid)?.name || '') : '';
+  const picker = document.getElementById('group-members-checkboxes');
+  picker.innerHTML = '';
+  const selected = gid ? contactGroups.find(x => x.id === gid) : null;
+  const selSet = selected ? selected.memberIds : new Set();
+  let any = false;
+  contacts.forEach(c => {
+    if (!c.id) return;
+    any = true;
+    const row = document.createElement('label');
+    row.className = 'gmb-row';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'gmb-cb';
+    cb.dataset.contactId = c.id;
+    cb.checked = selSet.has(c.id);
+    row.appendChild(cb);
+    const span = document.createElement('span');
+    span.textContent = contactDisplayName(c);
+    row.appendChild(span);
+    picker.appendChild(row);
+  });
+  if (!any) {
+    picker.innerHTML = '<p style="color:#8e8e93;font-size:13px;padding:12px;">Add conversations first, then you can put them in a group.</p>';
+  }
+  document.getElementById('group-modal').style.display = 'flex';
+}
+
+function closeGroupModal() {
+  document.getElementById('group-modal').style.display = 'none';
+  editingGroupId = null;
+}
+
+async function saveGroupFromModal() {
+  const name = document.getElementById('group-name-input').value.trim();
+  if (!name) return;
+  const ids = [...document.querySelectorAll('#group-members-checkboxes .gmb-cb:checked')]
+    .map(el => el.dataset.contactId)
+    .filter(Boolean);
+  if (editingGroupId) {
+    await updateGroupNameInDB(editingGroupId, name);
+    await saveGroupMembersToDB(editingGroupId, ids);
+  } else {
+    const newId = await createGroupInDB(name);
+    if (!newId) {
+      console.warn('Failed to create group');
+      return;
+    }
+    await saveGroupMembersToDB(newId, ids);
+  }
+  await loadContactGroupsFromDB();
+  closeGroupModal();
+  updateGroupBackBar();
+  updateSidebarFooterBtn();
+  refreshSidebarList();
+}
+
+async function deleteGroupConfirm(id) {
+  if (!confirm('Delete this group? Members stay in your chat list.')) return;
+  if (expandedGroupId === id) expandedGroupId = null;
+  await deleteGroupFromDB(id);
+  await loadContactGroupsFromDB();
+  updateGroupBackBar();
+  updateSidebarFooterBtn();
+  refreshSidebarList();
+}
+
+function renderGroupsList() {
+  const q = (document.getElementById('search-input').value || '').toLowerCase();
+  const list = document.getElementById('chat-list');
+  list.innerHTML = '';
+  const filtered = contactGroups.filter(g => !q || (g.name || '').toLowerCase().includes(q));
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty-side">' + (contactGroups.length ? 'No groups match your search.' : 'No groups yet. Use the button below to create one.') + '</div>';
+    return;
+  }
+  filtered.forEach((g) => {
+    const n = g.memberIds.size;
+    const gi = contactGroups.indexOf(g);
+    const div = document.createElement('div');
+    div.className = 'group-row';
+    div.onclick = () => openExpandedGroup(g.id);
+    div.innerHTML = `
+      <div class="chat-avatar" style="background:${colorFor(gi >= 0 ? gi : 0)}">${initials(g.name, '')}</div>
+      <div class="chat-item-info">
+        <div class="chat-item-top">
+          <span class="chat-item-name">${escapeHtml(g.name)}</span>
+        </div>
+        <div class="group-item-meta">${n} member${n === 1 ? '' : 's'}</div>
+      </div>
+      <button class="chat-item-delete" onclick="event.stopPropagation();deleteGroupConfirm('${g.id}')">Delete</button>`;
+    list.appendChild(div);
+  });
 }
 
 // ── MESSAGES CACHE ──
@@ -680,6 +974,7 @@ async function loadCachedMessages(contactNum) {
 async function initChat() {
   setLoading('Loading chats…');
   await loadContactsFromDB();
+  await loadContactGroupsFromDB();
   contacts.forEach((_, i) => { lastSids[i] = new Set(); });
   await preloadAllChats();
   // Populate lastSids from cache so poller never treats cached msgs as new
@@ -688,7 +983,7 @@ async function initChat() {
     lastSids[i] = new Set(msgs.map(m => m.sid));
   });
   hideLoading();
-  renderChatList();
+  refreshSidebarList();
   startAllPollers();
   startInboundChecker();
   syncMobileChatPanel();
@@ -717,6 +1012,57 @@ function contactAwaitingOurReply(c) {
   const preview = (c.lastMsg || '').trim();
   if (!preview || preview === 'No messages yet') return false;
   return !preview.startsWith('You: ');
+}
+
+// ── SIDEBAR: chats vs groups ──
+function refreshSidebarList() {
+  if (sidebarTab === 'groups' && expandedGroupId) renderGroupMembersList();
+  else if (sidebarTab === 'groups') renderGroupsList();
+  else renderChatList();
+}
+
+function renderGroupMembersList() {
+  const g = contactGroups.find(x => x.id === expandedGroupId);
+  const list = document.getElementById('chat-list');
+  list.innerHTML = '';
+  if (!g) {
+    closeExpandedGroup();
+    return;
+  }
+  const q = (document.getElementById('search-input').value || '').toLowerCase();
+  let shown = 0;
+  contacts.forEach((c, i) => {
+    if (!c.id || !g.memberIds.has(c.id)) return;
+    const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
+    if (q && !hay.includes(q)) return;
+    shown++;
+    const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
+    const previewEsc = (c.lastMsg || 'No messages yet').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const titleEsc = escapeHtml(contactDisplayName(c));
+    const phoneRow = contactHasNickname(c) ? `<div class="chat-item-phone">${escapeHtml(c.num)}</div>` : '';
+    const div = document.createElement('div');
+    const needsReply = contactAwaitingOurReply(c);
+    div.className = 'chat-item' + (i === activeIdx ? ' active' : '') + (needsReply ? ' needs-reply' : '');
+    div.onclick = () => openChat(i).catch(console.error);
+    div.innerHTML = `
+      <div class="chat-avatar" style="background:${colorFor(i)}">${initials(c.name, c.num)}</div>
+      <div class="chat-item-info">
+        <div class="chat-item-top">
+          <span class="chat-item-name">${titleEsc}</span>
+          <span class="chat-item-meta">
+            <span class="chat-item-time">${time}</span>
+            ${needsReply ? '<span class="chat-item-reply-dot" title="Send a reply to clear"></span>' : ''}
+          </span>
+        </div>
+        ${phoneRow}
+        <div class="chat-item-preview">${previewEsc}</div>
+      </div>
+      <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat(${i})">Delete</button>`;
+    list.appendChild(div);
+  });
+  if (!shown) {
+    list.innerHTML = '<div class="empty-side">No members match your search, or this group is empty. Use Edit group to add people.</div>';
+  }
 }
 
 // ── RENDER CHAT LIST ──
@@ -752,7 +1098,7 @@ function renderChatList() {
     list.appendChild(div);
   });
 }
-function filterChats() { renderChatList(); }
+function filterChats() { refreshSidebarList(); }
 
 function syncMobileChatPanel() {
   const app = document.getElementById('app');
@@ -766,7 +1112,7 @@ function backToChatList() {
   document.getElementById('chat-view').style.display = 'none';
   document.getElementById('empty-state').style.display = 'flex';
   syncMobileChatPanel();
-  renderChatList();
+  refreshSidebarList();
 }
 
 // ── OPEN CHAT ──
@@ -798,7 +1144,7 @@ function renderMessages(idx, msgs) {
     const last = msgs[msgs.length-1];
     if (last) { contacts[idx].lastMsg = (last.direction.startsWith('outbound')?'You: ':'')+(last.body||'').slice(0,40); contacts[idx].lastTime = last.date_sent||last.date_created; }
   }
-  renderChatList();
+  refreshSidebarList();
   msgs.forEach(m => appendMessageToDOM(area, m, idx));
 }
 
@@ -891,14 +1237,14 @@ async function fetchAndCacheContact(idx) {
     contacts[idx].lastTime = last.date_sent||last.date_created;
     saveContactToDB(contacts[idx]);
     if (activeIdx !== idx) {
-      renderChatList();
+      refreshSidebarList();
       return;
     }
     const area = document.getElementById('messages');
     let added = false;
     newMsgs.forEach(m => { if (area.querySelector(`[data-sid="${m.sid}"]`)) return; appendMessageToDOM(area, m, idx); added = true; });
     if (added) area.scrollTop = area.scrollHeight;
-    renderChatList();
+    refreshSidebarList();
   } catch(e) {} finally { isFetching[idx] = false; }
 }
 
@@ -924,7 +1270,7 @@ async function checkForNewSenders() {
       contacts.push(newC);
       const i = contacts.length-1;
       lastSids[i] = new Set();
-      startPoller(i); renderChatList();
+      startPoller(i); refreshSidebarList();
       showToast(`💬 New message from ${senderNum}`, (msg.body||'').slice(0,50));
     }
   } catch(e) {}
@@ -944,7 +1290,7 @@ async function addContact() {
   contacts.push(newC);
   const i = contacts.length-1;
   lastSids[i] = new Set();
-  closeAddContactModal(); renderChatList(); startPoller(i); openChat(i);
+  closeAddContactModal(); refreshSidebarList(); startPoller(i); openChat(i);
 }
 async function deleteChat(idx) {
   if (!confirm('Delete this conversation?')) return;
@@ -952,7 +1298,10 @@ async function deleteChat(idx) {
   const c = contacts[idx];
   const userId = getUserId();
   const token = currentUser?.access_token;
-  if (c.id) await deleteContactFromDB(c.id);
+  if (c.id) {
+    await deleteContactFromGroupMembersDB(c.id);
+    await deleteContactFromDB(c.id);
+  }
   const cacheFilter = `contact_num=eq.${encodeURIComponent(c.num)}&model_id=eq.${encodeURIComponent(currentModel.id)}&user_id=eq.${encodeURIComponent(userId)}`;
   await sbDelete(`/rest/v1/messages_cache?${cacheFilter}`, token);
   await sbDelete(`/rest/v1/read_state?${cacheFilter}`, token);
@@ -961,7 +1310,8 @@ async function deleteChat(idx) {
   if (activeIdx===idx) { activeIdx=-1; document.getElementById('chat-view').style.display='none'; document.getElementById('empty-state').style.display='flex'; }
   else if (activeIdx>idx) activeIdx--;
   syncMobileChatPanel();
-  renderChatList(); startAllPollers();
+  await loadContactGroupsFromDB();
+  refreshSidebarList(); startAllPollers();
 }
 function deleteCurrentChat() { if (activeIdx>=0) deleteChat(activeIdx); }
 
@@ -993,7 +1343,7 @@ async function sendMsg() {
     contacts[activeIdx].lastMsg = 'You: ' + previewBit;
     contacts[activeIdx].lastTime = optMsg.date_sent;
     saveContactToDB(contacts[activeIdx]);
-    renderChatList();
+    refreshSidebarList();
     area.scrollTop = area.scrollHeight;
   } catch(e) {}
 }
