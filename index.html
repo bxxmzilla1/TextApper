@@ -130,6 +130,48 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 #mass-msg-img-url { flex: 1; background: #2c2c2e; border: none; border-radius: 10px; padding: 8px 12px; font-size: 12px; color: #fff; outline: none; }
 .mass-recipient-count { font-size: 12px; color: #8e8e93; margin: 8px 0; }
 .mass-msg-progress { font-size: 12px; color: #30d158; margin-top: 8px; min-height: 18px; }
+/* Vault modal */
+#vault-modal { display: none; position: fixed; inset: 0; z-index: 635; background: rgba(0,0,0,0.82); align-items: center; justify-content: center; padding: 12px; }
+#vault-modal.open { display: flex; }
+.vault-shell { width: 100%; max-width: 960px; max-height: min(92vh, 880px); background: #1c1c1e; border-radius: 14px; border: 1px solid #2c2c2e; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.55); }
+.vault-head { padding: 14px 16px; border-bottom: 1px solid #2c2c2e; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.vault-head h2 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; min-width: 0; }
+.vault-layout { display: flex; flex: 1; min-height: 0; }
+.vault-sidebar { width: 220px; flex-shrink: 0; border-right: 1px solid #2c2c2e; background: #161618; display: flex; flex-direction: column; min-height: 0; }
+.vault-side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+.vault-nav-item { width: 100%; text-align: left; padding: 10px 12px; border: none; border-radius: 10px; background: transparent; color: #ececec; font-size: 13px; cursor: pointer; margin-bottom: 4px; display: flex; flex-direction: column; gap: 2px; }
+.vault-nav-item:hover { background: #2c2c2e; }
+.vault-nav-item.active { background: #2563eb; color: #fff; }
+.vault-nav-item .vn-meta { font-size: 11px; color: #8e8e93; }
+.vault-nav-item.active .vn-meta { color: rgba(255,255,255,0.85); }
+.vault-side-actions { padding: 8px; border-top: 1px solid #2c2c2e; flex-shrink: 0; }
+.vault-side-actions button { width: 100%; padding: 8px; border-radius: 8px; border: 1px dashed #48484a; background: #252527; color: #3390ec; font-size: 12px; font-weight: 600; cursor: pointer; }
+.vault-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.vault-toolbar { padding: 10px 14px; border-bottom: 1px solid #2c2c2e; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex-shrink: 0; }
+#vault-search { flex: 1; min-width: 140px; padding: 8px 12px; border-radius: 10px; border: none; background: #2c2c2e; color: #fff; font-size: 13px; outline: none; }
+.vault-filter-pill { padding: 6px 12px; border-radius: 999px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; background: #2c2c2e; color: #8e8e93; }
+.vault-filter-pill.active { background: #3a3a3c; color: #fff; }
+.vault-move-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
+#vault-move-section { flex: 1; min-width: 120px; padding: 8px 10px; border-radius: 8px; border: none; background: #2c2c2e; color: #fff; font-size: 12px; }
+.vault-btn-move { padding: 8px 14px; border-radius: 8px; border: none; background: #3390ec; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.vault-grid-wrap { flex: 1; overflow-y: auto; padding: 12px; min-height: 0; }
+.vault-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+.vault-tile { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; cursor: pointer; border: 2px solid transparent; background: #252527; }
+.vault-tile.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35); }
+.vault-tile img, .vault-tile video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.vault-tile .vt-type { position: absolute; right: 6px; bottom: 6px; font-size: 10px; padding: 2px 6px; border-radius: 6px; background: rgba(0,0,0,0.55); color: #fff; }
+.vault-tile .vt-check { position: absolute; left: 6px; top: 6px; width: 22px; height: 22px; border-radius: 6px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; }
+.vault-tile.selected .vt-check { background: #2563eb; border-color: #2563eb; }
+.vault-empty { text-align: center; color: #636366; font-size: 14px; padding: 40px 16px; }
+.vault-foot { padding: 12px 16px; border-top: 1px solid #2c2c2e; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-end; flex-shrink: 0; }
+.vault-foot .vault-count { margin-right: auto; font-size: 13px; color: #8e8e93; }
+@media (max-width: 700px) {
+  .vault-layout { flex-direction: column; }
+  .vault-sidebar { width: 100%; max-height: 160px; border-right: none; border-bottom: 1px solid #2c2c2e; }
+  .vault-side-scroll { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding: 8px; }
+  .vault-nav-item { flex: 0 0 auto; min-width: 130px; margin-bottom: 0; }
+  .vault-side-actions { border-top: none; border-bottom: 1px solid #2c2c2e; padding: 8px 12px; }
+}
 #chat-list { flex: 1; overflow-y: auto; min-height: 0; }
 #chat-list::-webkit-scrollbar { width: 4px; }
 #chat-list::-webkit-scrollbar-thumb { background: #3a3a3c; border-radius: 4px; }
@@ -469,6 +511,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
               <textarea id="msg-input" placeholder="Message" rows="1"></textarea>
             </div>
             <div class="compose-btns">
+              <button type="button" class="btn-icon" onclick="openVaultModal()" title="Vault">🗄</button>
               <label class="btn-attach" title="Upload file">
                 📎<input type="file" id="file-input" accept="image/*,video/*" multiple style="display:none;" onchange="uploadFile(this)"/>
               </label>
@@ -641,6 +684,47 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 </div>
 
+<!-- VAULT -->
+<div id="vault-modal" aria-hidden="true" onclick="if(event.target===this)closeVaultModal()">
+  <div class="vault-shell" role="dialog" aria-labelledby="vault-title" onclick="event.stopPropagation()">
+    <div class="vault-head">
+      <h2 id="vault-title">Vault</h2>
+      <button type="button" class="btn-icon" onclick="closeVaultModal()" aria-label="Close vault">✕</button>
+    </div>
+    <div class="vault-layout">
+      <aside class="vault-sidebar">
+        <div class="vault-side-scroll" id="vault-nav"></div>
+        <div class="vault-side-actions">
+          <button type="button" onclick="vaultCreateSection()">＋ New section</button>
+        </div>
+      </aside>
+      <div class="vault-main">
+        <div class="vault-toolbar">
+          <input type="search" id="vault-search" placeholder="Search caption or URL…" autocomplete="off" oninput="onVaultSearchInput()"/>
+          <button type="button" class="vault-filter-pill active" data-vf="all" onclick="vaultSetFilter('all')">All</button>
+          <button type="button" class="vault-filter-pill" data-vf="photo" onclick="vaultSetFilter('photo')">Photo</button>
+          <button type="button" class="vault-filter-pill" data-vf="video" onclick="vaultSetFilter('video')">Video</button>
+        </div>
+        <div class="vault-toolbar" style="border-top:none;padding-top:0;">
+          <div class="vault-move-row">
+            <select id="vault-move-section"></select>
+            <button type="button" class="vault-btn-move" onclick="vaultMoveSelected()">Move to section</button>
+          </div>
+        </div>
+        <div class="vault-grid-wrap">
+          <div id="vault-grid" class="vault-grid"></div>
+          <p id="vault-empty" class="vault-empty" style="display:none;">No media yet. Upload files from chat — they appear here for this model.</p>
+        </div>
+      </div>
+    </div>
+    <div class="vault-foot">
+      <span class="vault-count" id="vault-select-count">0 selected</span>
+      <button type="button" class="btn-sec" onclick="closeVaultModal()">Close</button>
+      <button type="button" class="btn-primary" onclick="vaultConfirmSelection()">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <!-- LIGHTBOX -->
 <div id="lightbox" onclick="closeLightbox()">
   <button id="lightbox-close" onclick="closeLightbox()">✕</button>
@@ -680,6 +764,11 @@ let chatCache = {};
 let scrollPositions = {};
 let pendingMediaItems = [];
 let massMsgMediaItems = [];
+let vaultItems = [];
+let vaultSections = [];
+let vaultUiSectionId = null;
+let vaultSelectedIds = new Set();
+let vaultFilter = 'all';
 
 function isLikelyVideoUrl(url) {
   const u = (url || '').toLowerCase().split('?')[0].split('#')[0];
@@ -790,6 +879,12 @@ async function sbDelete(path, token) {
     console.warn('DELETE failed', path, r.status, t);
   }
   return r.ok;
+}
+async function sbPatch(path, body, token, prefer) {
+  const h = { ...sbHeaders(token) };
+  if (prefer) h['Prefer'] = prefer;
+  const r = await fetch(SUPABASE_URL + path, { method: 'PATCH', headers: h, body: JSON.stringify(body) });
+  return r;
 }
 function proxyUrl(path) { return PROXY + '?path=' + encodeURIComponent(path); }
 function initials(name, num) { if (name) return name.slice(0,2).toUpperCase(); return (num||'').replace(/\D/g,'').slice(-2); }
@@ -2053,6 +2148,249 @@ async function deleteChat(idx) {
 }
 function deleteCurrentChat() { if (activeIdx>=0) deleteChat(activeIdx); }
 
+// ── VAULT ──
+async function registerVaultMedia(publicUrl, kind, caption, storagePath) {
+  if (!currentModel || !getUserId()) return;
+  const token = getAccessToken();
+  const row = {
+    user_id: getUserId(),
+    model_id: currentModel.id,
+    public_url: publicUrl,
+    kind: kind === 'video' ? 'video' : 'image',
+    caption: caption || null,
+    storage_path: storagePath || null,
+    section_id: null
+  };
+  try {
+    await sbPost('/rest/v1/model_vault_items', row, token, 'return=minimal');
+  } catch (e) { console.warn('Vault register failed', e); }
+}
+async function loadVaultData() {
+  vaultItems = [];
+  vaultSections = [];
+  if (!currentModel || !getUserId()) return;
+  const token = getAccessToken();
+  const uid = getUserId();
+  const mid = currentModel.id;
+  const secs = await sbGet('/rest/v1/model_vault_sections', {
+    select: '*',
+    model_id: 'eq.' + mid,
+    user_id: 'eq.' + uid,
+    order: 'sort_order.asc,created_at.asc'
+  }, token);
+  vaultSections = Array.isArray(secs) ? secs : [];
+  const items = await sbGet('/rest/v1/model_vault_items', {
+    select: '*',
+    model_id: 'eq.' + mid,
+    user_id: 'eq.' + uid,
+    order: 'created_at.desc'
+  }, token);
+  vaultItems = Array.isArray(items) ? items : [];
+}
+function vaultCountAll() { return vaultItems.length; }
+function vaultCountSection(sid) { return vaultItems.filter(i => i.section_id === sid).length; }
+function vaultCountImages(list) { return list.filter(i => i.kind === 'image').length; }
+function vaultCountVideos(list) { return list.filter(i => i.kind === 'video').length; }
+function getVaultNavList() {
+  if (vaultUiSectionId) return vaultItems.filter(i => i.section_id === vaultUiSectionId);
+  return vaultItems;
+}
+function getVaultFilteredItems() {
+  let list = getVaultNavList();
+  if (vaultFilter === 'photo') list = list.filter(i => i.kind === 'image');
+  else if (vaultFilter === 'video') list = list.filter(i => i.kind === 'video');
+  const q = (document.getElementById('vault-search')?.value || '').trim().toLowerCase();
+  if (q) {
+    list = list.filter(i =>
+      String(i.caption || '').toLowerCase().includes(q) ||
+      String(i.public_url || '').toLowerCase().includes(q)
+    );
+  }
+  return list;
+}
+function updateVaultSelectCount() {
+  const el = document.getElementById('vault-select-count');
+  if (el) el.textContent = vaultSelectedIds.size + ' selected';
+}
+function fillVaultMoveSelect() {
+  const sel = document.getElementById('vault-move-section');
+  if (!sel) return;
+  sel.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = '';
+  o0.textContent = 'Unfiled (no folder)';
+  sel.appendChild(o0);
+  vaultSections.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = s.name;
+    sel.appendChild(o);
+  });
+}
+function renderVaultNav() {
+  const nav = document.getElementById('vault-nav');
+  if (!nav) return;
+  nav.innerHTML = '';
+  const allBtn = document.createElement('button');
+  allBtn.type = 'button';
+  allBtn.className = 'vault-nav-item' + (vaultUiSectionId === null ? ' active' : '');
+  const allList = vaultItems;
+  allBtn.innerHTML = '<span>All media</span><span class="vn-meta">' + vaultCountImages(allList) + ' photos · ' + vaultCountVideos(allList) + ' videos</span>';
+  allBtn.onclick = () => { vaultUiSectionId = null; vaultSelectedIds.clear(); renderVaultUI(); };
+  nav.appendChild(allBtn);
+  vaultSections.forEach(s => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'vault-nav-item' + (vaultUiSectionId === s.id ? ' active' : '');
+    const sub = vaultItems.filter(i => i.section_id === s.id);
+    b.innerHTML = '<span>' + escapeHtml(s.name) + '</span><span class="vn-meta">' + vaultCountImages(sub) + ' photos · ' + vaultCountVideos(sub) + ' videos</span>';
+    b.onclick = () => { vaultUiSectionId = s.id; vaultSelectedIds.clear(); renderVaultUI(); };
+    nav.appendChild(b);
+  });
+}
+function renderVaultGrid() {
+  const grid = document.getElementById('vault-grid');
+  const empty = document.getElementById('vault-empty');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const list = getVaultFilteredItems();
+  if (!list.length) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  list.forEach(item => {
+    const tile = document.createElement('div');
+    tile.className = 'vault-tile' + (vaultSelectedIds.has(item.id) ? ' selected' : '');
+    tile.onclick = () => {
+      if (vaultSelectedIds.has(item.id)) vaultSelectedIds.delete(item.id);
+      else vaultSelectedIds.add(item.id);
+      renderVaultGrid();
+      updateVaultSelectCount();
+    };
+    const chk = document.createElement('div');
+    chk.className = 'vt-check';
+    chk.textContent = vaultSelectedIds.has(item.id) ? '✓' : '';
+    if (item.kind === 'video') {
+      const v = document.createElement('video');
+      v.src = item.public_url;
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = 'metadata';
+      tile.appendChild(v);
+    } else {
+      const img = document.createElement('img');
+      img.src = item.public_url;
+      img.alt = '';
+      tile.appendChild(img);
+    }
+    const typ = document.createElement('div');
+    typ.className = 'vt-type';
+    typ.textContent = item.kind === 'video' ? 'Video' : 'Photo';
+    tile.appendChild(typ);
+    tile.appendChild(chk);
+    grid.appendChild(tile);
+  });
+}
+function vaultSetFilter(mode) {
+  vaultFilter = mode;
+  document.querySelectorAll('.vault-filter-pill').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-vf') === mode);
+  });
+  renderVaultGrid();
+}
+function onVaultSearchInput() { renderVaultGrid(); }
+function renderVaultUI() {
+  renderVaultNav();
+  fillVaultMoveSelect();
+  renderVaultGrid();
+  updateVaultSelectCount();
+  document.querySelectorAll('.vault-filter-pill').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-vf') === vaultFilter);
+  });
+}
+async function openVaultModal() {
+  if (!currentModel) {
+    showToast('Vault', 'Select a model first.');
+    return;
+  }
+  const el = document.getElementById('vault-modal');
+  if (!el) return;
+  vaultUiSectionId = null;
+  vaultSelectedIds.clear();
+  vaultFilter = 'all';
+  const s = document.getElementById('vault-search');
+  if (s) s.value = '';
+  el.classList.add('open');
+  el.setAttribute('aria-hidden', 'false');
+  await loadVaultData();
+  renderVaultUI();
+}
+function closeVaultModal() {
+  const el = document.getElementById('vault-modal');
+  if (!el) return;
+  el.classList.remove('open');
+  el.setAttribute('aria-hidden', 'true');
+}
+async function vaultCreateSection() {
+  if (!currentModel || !getUserId()) return;
+  const name = prompt('Section name');
+  if (!name || !name.trim()) return;
+  const token = getAccessToken();
+  const body = {
+    user_id: getUserId(),
+    model_id: currentModel.id,
+    name: name.trim(),
+    sort_order: vaultSections.length
+  };
+  const data = await sbPost('/rest/v1/model_vault_sections', body, token, 'return=representation');
+  if (data && (data.code || data.message)) {
+    showToast('Vault', 'Could not create section. Run model_vault.sql in Supabase if you have not yet.');
+    return;
+  }
+  await loadVaultData();
+  renderVaultUI();
+}
+async function vaultMoveSelected() {
+  if (!vaultSelectedIds.size) {
+    showToast('Vault', 'Select one or more items first.');
+    return;
+  }
+  const sel = document.getElementById('vault-move-section');
+  const raw = sel ? sel.value : '';
+  const sectionId = raw || null;
+  const token = getAccessToken();
+  for (const id of [...vaultSelectedIds]) {
+    const r = await sbPatch('/rest/v1/model_vault_items?id=eq.' + id, { section_id: sectionId }, token, 'return=minimal');
+    if (!r.ok) {
+      showToast('Vault', 'Move failed. Check Supabase tables (model_vault).');
+      await loadVaultData();
+      renderVaultUI();
+      return;
+    }
+  }
+  vaultSelectedIds.clear();
+  await loadVaultData();
+  renderVaultUI();
+  showToast('Vault', 'Moved.');
+}
+function vaultConfirmSelection() {
+  if (!vaultSelectedIds.size) {
+    showToast('Vault', 'Select media to attach.');
+    return;
+  }
+  for (const id of vaultSelectedIds) {
+    const item = vaultItems.find(x => x.id === id);
+    if (!item) continue;
+    const kind = item.kind === 'video' ? 'video' : 'image';
+    addPendingMediaItem('composer', item.public_url, kind);
+  }
+  renderPendingMediaPreview('composer-preview', 'composer');
+  closeVaultModal();
+  showToast('Vault', 'Added to message.');
+  document.getElementById('msg-input')?.focus();
+}
+
 // ── SEND ──
 async function twilioPostMessage(toNum, body, mediaUrls) {
   if (!currentModel) return { ok: false, err: null };
@@ -2204,6 +2542,7 @@ async function uploadMassMsgFile(input) {
         xhr.send(file);
       });
       const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
+      registerVaultMedia(publicUrl, kind, file.name, filename);
       addPendingMediaItem('mass', publicUrl, kind);
       document.getElementById('mass-msg-img-url').value = publicUrl;
       document.getElementById('mass-msg-img-wrap').style.display = 'flex';
@@ -2430,6 +2769,7 @@ async function uploadFile(input) {
       await new Promise((res,rej)=>{ xhr.onload=()=>xhr.status<300?res():rej(new Error('Upload failed: '+xhr.status)); xhr.onerror=()=>rej(new Error('Network error')); xhr.send(file); });
       barEl.style.width='100%';
       const publicUrl=`${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
+      registerVaultMedia(publicUrl, kind, file.name, filename);
       addPendingMediaItem('composer', publicUrl, kind);
       document.getElementById('img-url').value='';
       document.getElementById('img-url-wrap').style.display='none';
