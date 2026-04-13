@@ -2016,7 +2016,7 @@ async function deleteChat(idx) {
 function deleteCurrentChat() { if (activeIdx>=0) deleteChat(activeIdx); }
 
 // ── SEND ──
-async function twilioPostMessage(toNum, body, mediaUrl) {
+async function twilioPostMessage(toNum, body, mediaUrls) {
   if (!currentModel) return { ok: false, err: null };
   const { twilio_sid: sid, twilio_auth: auth, twilio_number: fromNum } = currentModel;
   try {
@@ -2024,7 +2024,8 @@ async function twilioPostMessage(toNum, body, mediaUrl) {
     fd.append('From', fromNum);
     fd.append('To', toNum);
     fd.append('Body', body || '');
-    if (mediaUrl) fd.append('MediaUrl', mediaUrl);
+    const urls = Array.isArray(mediaUrls) ? mediaUrls : (mediaUrls ? [mediaUrls] : []);
+    urls.filter(Boolean).slice(0, 10).forEach(u => fd.append('MediaUrl', u));
     const r = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages.json`), {
       method: 'POST',
       headers: { Authorization: 'Basic ' + btoa(sid + ':' + auth) },
@@ -2181,13 +2182,13 @@ async function runMassSend() {
   if (massSendLock) return;
   const body = document.getElementById('mass-msg-body').value.trim();
   const items = (massMsgMediaItems || []);
-  const img = items.find(x => x.kind === 'image')?.url || '';
+  const images = items.filter(x => x.kind === 'image').map(x => x.url).filter(Boolean);
   const videoLinks = items.filter(x => x.kind === 'video').map(x => x.url);
   const otherLinks = items.filter(x => x.kind === 'link').map(x => x.url);
   const links = [...videoLinks, ...otherLinks];
   const combinedBody = links.length ? (body ? (body + '\n' + links.join('\n')) : links.join('\n')) : body;
-  const mediaUrl = img || '';
-  if (!combinedBody && !mediaUrl) {
+  const mediaUrls = images.slice(0, 10);
+  if (!combinedBody && !mediaUrls.length) {
     showToast('Mass message', 'Add text or media.');
     return;
   }
@@ -2206,7 +2207,7 @@ async function runMassSend() {
   for (let i = 0; i < rec.length; i++) {
     const { idx, c } = rec[i];
     prog.textContent = 'Sending ' + (i + 1) + '/' + rec.length + '…';
-    const res = await twilioPostMessage(c.num, combinedBody, mediaUrl || undefined);
+    const res = await twilioPostMessage(c.num, combinedBody, mediaUrls.length ? mediaUrls : undefined);
     if (!res.ok) {
       fail++;
       continue;
@@ -2217,8 +2218,8 @@ async function runMassSend() {
       sid: d.sid,
       direction: 'outbound-api',
       body: d.body || combinedBody,
-      num_media: mediaUrl ? 1 : 0,
-      media_url: mediaUrl || null,
+      num_media: mediaUrls.length,
+      media_url: mediaUrls[0] || null,
       date_sent: d.date_created || new Date().toISOString(),
       date_created: d.date_created || new Date().toISOString()
     };
@@ -2231,7 +2232,7 @@ async function runMassSend() {
       const hasLinks = links.length > 0;
       const previewBit = hasLinks
         ? (body ? body.slice(0, 40) : '[Links]')
-        : (mediaUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
+        : (mediaUrls.length ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
       contacts[idx].lastMsg = 'You: ' + previewBit;
       contacts[idx].lastTime = optMsg.date_sent;
       saveContactToDB(contacts[idx]);
@@ -2254,22 +2255,22 @@ async function runMassSend() {
 async function sendMsg() {
   const body = document.getElementById('msg-input').value.trim();
   const items = (pendingMediaItems || []);
-  const img = items.find(x => x.kind === 'image')?.url || '';
+  const images = items.filter(x => x.kind === 'image').map(x => x.url).filter(Boolean);
   const videoLinks = items.filter(x => x.kind === 'video').map(x => x.url);
   const otherLinks = items.filter(x => x.kind === 'link').map(x => x.url);
   const links = [...videoLinks, ...otherLinks];
   const combinedBody = links.length ? (body ? (body + '\n' + links.join('\n')) : links.join('\n')) : body;
-  const mediaUrl = img || '';
-  if (!combinedBody && !mediaUrl) return;
+  const mediaUrls = images.slice(0, 10);
+  if (!combinedBody && !mediaUrls.length) return;
   if (activeIdx < 0 || !currentModel) return;
   const c = contacts[activeIdx];
-  const res = await twilioPostMessage(c.num, combinedBody, mediaUrl || undefined);
+  const res = await twilioPostMessage(c.num, combinedBody, mediaUrls.length ? mediaUrls : undefined);
   if (!res.ok) return;
   const d = res.d;
   document.getElementById('msg-input').value = '';
   document.getElementById('msg-input').style.height = 'auto';
   clearImgUrl();
-  const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || combinedBody, num_media: mediaUrl ? 1 : 0, media_url: mediaUrl || null, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
+  const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || combinedBody, num_media: mediaUrls.length, media_url: mediaUrls[0] || null, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
   const area = document.getElementById('messages');
   appendMessageToDOM(area, optMsg, activeIdx);
   lastSids[activeIdx].add(d.sid);
@@ -2278,7 +2279,7 @@ async function sendMsg() {
   const hasLinks = links.length > 0;
   const previewBit = hasLinks
     ? (body ? body.slice(0, 40) : '[Links]')
-    : (mediaUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
+    : (mediaUrls.length ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
   contacts[activeIdx].lastMsg = 'You: ' + previewBit;
   contacts[activeIdx].lastTime = optMsg.date_sent;
   saveContactToDB(contacts[activeIdx]);
