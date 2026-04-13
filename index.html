@@ -283,11 +283,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .compose { background: #1c1c1e; border-top: 1px solid #2c2c2e; padding: 10px 14px; padding-bottom: max(10px, env(safe-area-inset-bottom)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }
 #img-url-wrap { display: none; align-items: center; gap: 6px; margin-bottom: 6px; }
 #img-url { flex: 1; background: #2c2c2e; border: none; border-radius: 10px; padding: 7px 12px; font-size: 13px; color: #fff; outline: none; }
-.pending-media-preview { display: none; margin: 6px 0 2px; background: #1f1f22; border: 1px solid #2c2c2e; border-radius: 12px; padding: 8px; }
+.pending-media-preview { display: none; margin: 6px 0 2px; }
 .pending-media-preview.open { display: block; }
-.pending-media-preview img, .pending-media-preview video { width: 100%; max-height: 220px; border-radius: 10px; display: block; object-fit: cover; background: #000; }
-.pending-media-preview .meta { margin-top: 6px; font-size: 12px; color: #8e8e93; display: flex; justify-content: space-between; gap: 10px; }
-.pending-media-preview .meta .type { color: #30d158; font-weight: 600; }
+.pending-media-strip { display:flex; gap:8px; overflow:auto; padding: 2px 2px 6px; scroll-snap-type: x mandatory; }
+.pending-media-card { position:relative; width: 150px; min-width:150px; height: 108px; border-radius: 14px; border: 1px solid #2c2c2e; background: #1f1f22; overflow:hidden; scroll-snap-align: start; }
+.pending-media-card img, .pending-media-card video { width:100%; height:100%; object-fit: cover; display:block; background:#000; }
+.pending-media-card video { object-fit: cover; }
+.pending-media-card .badge { position:absolute; left:8px; bottom:8px; font-size:11px; padding:3px 8px; border-radius: 999px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.12); color:#fff; }
+.pending-media-card .x { position:absolute; right:8px; top:8px; width:24px; height:24px; border-radius: 999px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.12); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; line-height:1; }
+.pending-media-card .x:hover { background: rgba(0,0,0,0.7); }
+.pending-media-card .fallback { width:100%; height:100%; display:flex; align-items:center; justify-content:center; padding:12px; text-align:center; color:#8e8e93; font-size:12px; }
 .compose-inner { flex: 1; display: flex; flex-direction: column; }
 #msg-input { background: #2c2c2e; border: none; border-radius: 22px; padding: 10px 16px; font-size: 15px; font-family: inherit; color: #fff; resize: none; outline: none; max-height: 120px; line-height: 1.4; }
 #msg-input::placeholder { color: #48484a; }
@@ -458,7 +463,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
             </div>
             <div class="compose-btns">
               <label class="btn-attach" title="Upload file">
-                📎<input type="file" id="file-input" accept="image/*,video/*" style="display:none;" onchange="uploadFile(this)"/>
+                📎<input type="file" id="file-input" accept="image/*,video/*" multiple style="display:none;" onchange="uploadFile(this)"/>
               </label>
               <button id="btn-send" onclick="sendMsg()">
                 <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
@@ -615,7 +620,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <div id="mass-preview" class="pending-media-preview" aria-label="Mass attachment preview"></div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
       <label class="btn-attach" style="margin:0;" title="Upload image or video">
-        📎<input type="file" id="mass-msg-file" accept="image/*,video/*" style="display:none;" onchange="uploadMassMsgFile(this)"/>
+        📎<input type="file" id="mass-msg-file" accept="image/*,video/*" multiple style="display:none;" onchange="uploadMassMsgFile(this)"/>
       </label>
       <span style="font-size:12px;color:#8e8e93;">Attach image or video (optional)</span>
     </div>
@@ -666,10 +671,8 @@ let intervals = {};
 let lastSids = {};
 let chatCache = {};
 let scrollPositions = {};
-let pendingMediaUrl = null;
-let massMsgMediaUrl = null;
-let pendingMediaSendAsLink = false;
-let massMsgMediaSendAsLink = false;
+let pendingMediaItems = [];
+let massMsgMediaItems = [];
 
 function isLikelyVideoUrl(url) {
   const u = (url || '').toLowerCase().split('?')[0].split('#')[0];
@@ -679,42 +682,75 @@ function isLikelyImageUrl(url) {
   const u = (url || '').toLowerCase().split('?')[0].split('#')[0];
   return u.endsWith('.png') || u.endsWith('.jpg') || u.endsWith('.jpeg') || u.endsWith('.gif') || u.endsWith('.webp') || u.endsWith('.bmp') || u.endsWith('.svg');
 }
-function renderPendingMediaPreview(containerId, url, forceVideo) {
+function inferMediaKind(url, forceVideo) {
+  if (forceVideo || isLikelyVideoUrl(url)) return 'video';
+  if (isLikelyImageUrl(url)) return 'image';
+  return 'link';
+}
+function normalizeUrlForCompare(url) {
+  return (url || '').trim();
+}
+function addPendingMediaItem(whichList, url, kind) {
+  const clean = normalizeUrlForCompare(url);
+  if (!clean) return;
+  const list = whichList === 'mass' ? massMsgMediaItems : pendingMediaItems;
+  const k = kind || inferMediaKind(clean, false);
+  if (list.some(x => normalizeUrlForCompare(x.url) === clean)) return;
+  list.push({ url: clean, kind: k });
+}
+function removePendingMediaItem(whichList, idx) {
+  const list = whichList === 'mass' ? massMsgMediaItems : pendingMediaItems;
+  if (!list || idx < 0 || idx >= list.length) return;
+  list.splice(idx, 1);
+  renderPendingMediaPreview(whichList === 'mass' ? 'mass-preview' : 'composer-preview', whichList);
+}
+function renderPendingMediaPreview(containerId, whichList) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  const clean = (url || '').trim();
-  if (!clean) { el.classList.remove('open'); el.innerHTML = ''; return; }
-  const video = !!(forceVideo || isLikelyVideoUrl(clean));
-  const image = !video && isLikelyImageUrl(clean);
+  const list = whichList === 'mass' ? massMsgMediaItems : pendingMediaItems;
+  if (!list.length) { el.classList.remove('open'); el.innerHTML = ''; return; }
   el.classList.add('open');
   el.innerHTML = '';
-  if (video) {
-    const v = document.createElement('video');
-    v.src = clean;
-    v.controls = true;
-    v.playsInline = true;
-    el.appendChild(v);
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.innerHTML = `<span class="type">Video</span><span title="${escapeHtml(clean)}">${escapeHtml(clean)}</span>`;
-    el.appendChild(meta);
-    return;
-  }
-  if (image) {
-    const img = document.createElement('img');
-    img.src = clean;
-    img.alt = 'Attachment preview';
-    el.appendChild(img);
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.innerHTML = `<span class="type">Image</span><span title="${escapeHtml(clean)}">${escapeHtml(clean)}</span>`;
-    el.appendChild(meta);
-    return;
-  }
-  const meta = document.createElement('div');
-  meta.className = 'meta';
-  meta.innerHTML = `<span class="type">Link</span><span title="${escapeHtml(clean)}">${escapeHtml(clean)}</span>`;
-  el.appendChild(meta);
+  const strip = document.createElement('div');
+  strip.className = 'pending-media-strip';
+  list.forEach((item, idx) => {
+    const card = document.createElement('div');
+    card.className = 'pending-media-card';
+
+    const badge = document.createElement('div');
+    badge.className = 'badge';
+    badge.textContent = item.kind === 'video' ? 'Video link' : (item.kind === 'image' ? 'Image' : 'Link');
+
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'x';
+    x.textContent = '✕';
+    x.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); removePendingMediaItem(whichList, idx); });
+
+    if (item.kind === 'video') {
+      const v = document.createElement('video');
+      v.src = item.url;
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = 'metadata';
+      card.appendChild(v);
+    } else if (item.kind === 'image') {
+      const img = document.createElement('img');
+      img.src = item.url;
+      img.alt = 'Attachment preview';
+      card.appendChild(img);
+    } else {
+      const fb = document.createElement('div');
+      fb.className = 'fallback';
+      fb.textContent = item.url;
+      card.appendChild(fb);
+    }
+
+    card.appendChild(badge);
+    card.appendChild(x);
+    strip.appendChild(card);
+  });
+  el.appendChild(strip);
 }
 let massSendLock = false;
 let editingModelId = null;
@@ -2017,11 +2053,10 @@ function openMassMsgModal() {
   }
   document.getElementById('mass-msg-modal').style.display = 'flex';
   document.getElementById('mass-msg-body').value = '';
-  massMsgMediaUrl = null;
-  massMsgMediaSendAsLink = false;
+  massMsgMediaItems = [];
   document.getElementById('mass-msg-img-url').value = '';
   document.getElementById('mass-msg-img-wrap').style.display = 'none';
-  renderPendingMediaPreview('mass-preview', '', false);
+  renderPendingMediaPreview('mass-preview', 'mass');
   const uh = document.getElementById('mass-msg-upload-hint');
   if (uh) { uh.style.display = 'none'; uh.textContent = ''; }
   document.getElementById('mass-msg-progress').textContent = '';
@@ -2060,18 +2095,17 @@ function openMassMsgModal() {
 
 function closeMassMsgModal() {
   document.getElementById('mass-msg-modal').style.display = 'none';
-  massMsgMediaUrl = null;
+  massMsgMediaItems = [];
   massSendLock = false;
   const sendBtn = document.querySelector('.mass-send-btn');
   if (sendBtn) sendBtn.disabled = false;
 }
 
 function clearMassMsgMedia() {
-  massMsgMediaUrl = null;
-  massMsgMediaSendAsLink = false;
+  massMsgMediaItems = [];
   document.getElementById('mass-msg-img-url').value = '';
   document.getElementById('mass-msg-img-wrap').style.display = 'none';
-  renderPendingMediaPreview('mass-preview', '', false);
+  renderPendingMediaPreview('mass-preview', 'mass');
 }
 
 function collectMassRecipients() {
@@ -2110,45 +2144,49 @@ function updateMassRecipientCount() {
 }
 
 async function uploadMassMsgFile(input) {
-  const file = input.files[0];
-  if (!file) return;
+  const files = [...(input.files || [])];
+  if (!files.length) return;
   input.value = '';
   const hint = document.getElementById('mass-msg-upload-hint');
   hint.style.display = 'block';
-  hint.textContent = 'Uploading ' + file.name + '…';
-  massMsgMediaSendAsLink = !!(file.type && file.type.startsWith('video/'));
-  const ext = file.name.split('.').pop();
-  const filename = Date.now() + '_' + Math.random().toString(36).slice(2) + '.' + ext;
-  try {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${filename}`);
-    xhr.setRequestHeader('Authorization', 'Bearer ' + SUPABASE_KEY);
-    xhr.setRequestHeader('x-upsert', 'true');
-    await new Promise((res, rej) => {
-      xhr.onload = () => (xhr.status < 300 ? res() : rej(new Error('Upload failed')));
-      xhr.onerror = () => rej(new Error('Network error'));
-      xhr.send(file);
-    });
-    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
-    massMsgMediaUrl = publicUrl;
-    document.getElementById('mass-msg-img-url').value = publicUrl;
-    document.getElementById('mass-msg-img-wrap').style.display = 'flex';
-    renderPendingMediaPreview('mass-preview', publicUrl, massMsgMediaSendAsLink);
-    hint.textContent = 'Ready: ' + file.name + (massMsgMediaSendAsLink ? ' (will send link)' : '');
-    setTimeout(() => { hint.style.display = 'none'; }, 2200);
-  } catch (e) {
-    hint.textContent = 'Upload failed';
-    setTimeout(() => { hint.style.display = 'none'; }, 2800);
+  hint.textContent = 'Uploading ' + files.length + ' file(s)…';
+  for (const file of files) {
+    const kind = (file.type && file.type.startsWith('video/')) ? 'video' : 'image';
+    const ext = file.name.split('.').pop();
+    const filename = Date.now() + '_' + Math.random().toString(36).slice(2) + '.' + ext;
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${filename}`);
+      xhr.setRequestHeader('Authorization', 'Bearer ' + SUPABASE_KEY);
+      xhr.setRequestHeader('x-upsert', 'true');
+      await new Promise((res, rej) => {
+        xhr.onload = () => (xhr.status < 300 ? res() : rej(new Error('Upload failed')));
+        xhr.onerror = () => rej(new Error('Network error'));
+        xhr.send(file);
+      });
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
+      addPendingMediaItem('mass', publicUrl, kind);
+      document.getElementById('mass-msg-img-url').value = publicUrl;
+      document.getElementById('mass-msg-img-wrap').style.display = 'flex';
+      renderPendingMediaPreview('mass-preview', 'mass');
+      hint.textContent = 'Ready: ' + file.name + (kind === 'video' ? ' (will send link)' : '');
+    } catch (e) {
+      hint.textContent = 'Upload failed: ' + file.name;
+    }
   }
+  setTimeout(() => { hint.style.display = 'none'; }, 2200);
 }
 
 async function runMassSend() {
   if (massSendLock) return;
   const body = document.getElementById('mass-msg-body').value.trim();
-  const uploadedUrl = massMsgMediaUrl || (document.getElementById('mass-msg-img-url').value || '').trim() || '';
-  const linkMode = !!(massMsgMediaSendAsLink && uploadedUrl);
-  const mediaUrl = linkMode ? '' : uploadedUrl;
-  const combinedBody = linkMode ? (body ? (body + '\n' + uploadedUrl) : uploadedUrl) : body;
+  const items = (massMsgMediaItems || []);
+  const img = items.find(x => x.kind === 'image')?.url || '';
+  const videoLinks = items.filter(x => x.kind === 'video').map(x => x.url);
+  const otherLinks = items.filter(x => x.kind === 'link').map(x => x.url);
+  const links = [...videoLinks, ...otherLinks];
+  const combinedBody = links.length ? (body ? (body + '\n' + links.join('\n')) : links.join('\n')) : body;
+  const mediaUrl = img || '';
   if (!combinedBody && !mediaUrl) {
     showToast('Mass message', 'Add text or media.');
     return;
@@ -2190,7 +2228,10 @@ async function runMassSend() {
       if (!chatCache[c.num]) chatCache[c.num] = [];
       chatCache[c.num].push(optMsg);
       cacheSingleMessage(c.num, optMsg);
-      const previewBit = linkMode ? (body ? body.slice(0, 40) : '[Video link]') : (mediaUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
+      const hasLinks = links.length > 0;
+      const previewBit = hasLinks
+        ? (body ? body.slice(0, 40) : '[Links]')
+        : (mediaUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
       contacts[idx].lastMsg = 'You: ' + previewBit;
       contacts[idx].lastTime = optMsg.date_sent;
       saveContactToDB(contacts[idx]);
@@ -2212,10 +2253,13 @@ async function runMassSend() {
 
 async function sendMsg() {
   const body = document.getElementById('msg-input').value.trim();
-  const uploadedUrl = pendingMediaUrl || document.getElementById('img-url').value.trim() || '';
-  const linkMode = !!(pendingMediaSendAsLink && uploadedUrl);
-  const mediaUrl = linkMode ? '' : uploadedUrl;
-  const combinedBody = linkMode ? (body ? (body + '\n' + uploadedUrl) : uploadedUrl) : body;
+  const items = (pendingMediaItems || []);
+  const img = items.find(x => x.kind === 'image')?.url || '';
+  const videoLinks = items.filter(x => x.kind === 'video').map(x => x.url);
+  const otherLinks = items.filter(x => x.kind === 'link').map(x => x.url);
+  const links = [...videoLinks, ...otherLinks];
+  const combinedBody = links.length ? (body ? (body + '\n' + links.join('\n')) : links.join('\n')) : body;
+  const mediaUrl = img || '';
   if (!combinedBody && !mediaUrl) return;
   if (activeIdx < 0 || !currentModel) return;
   const c = contacts[activeIdx];
@@ -2231,7 +2275,10 @@ async function sendMsg() {
   lastSids[activeIdx].add(d.sid);
   if (chatCache[c.num]) chatCache[c.num].push(optMsg);
   cacheSingleMessage(c.num, optMsg);
-  const previewBit = linkMode ? (body ? body.slice(0, 40) : '[Video link]') : (mediaUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
+  const hasLinks = links.length > 0;
+  const previewBit = hasLinks
+    ? (body ? body.slice(0, 40) : '[Links]')
+    : (mediaUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
   contacts[activeIdx].lastMsg = 'You: ' + previewBit;
   contacts[activeIdx].lastTime = optMsg.date_sent;
   saveContactToDB(contacts[activeIdx]);
@@ -2272,39 +2319,41 @@ async function loadTwilioMedia(msgSid, contactIdx, bubble, ts) {
 
 // ── UPLOAD ──
 async function uploadFile(input) {
-  const file = input.files[0]; if (!file) return; input.value='';
+  const files = [...(input.files || [])];
+  if (!files.length) return;
+  input.value='';
   const statusEl=document.getElementById('upload-status'), barEl=document.getElementById('upload-bar'), labelEl=document.getElementById('upload-label');
-  statusEl.style.display='flex'; barEl.style.width='10%'; labelEl.textContent='Uploading '+file.name+'…';
-  pendingMediaSendAsLink = !!(file.type && file.type.startsWith('video/'));
-  const ext=file.name.split('.').pop();
-  const filename=Date.now()+'_'+Math.random().toString(36).slice(2)+'.'+ext;
-  try {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${filename}`);
-    xhr.setRequestHeader('Authorization','Bearer '+SUPABASE_KEY);
-    xhr.setRequestHeader('x-upsert','true');
-    xhr.upload.onprogress = e => { if(e.lengthComputable) barEl.style.width=Math.round(e.loaded/e.total*90)+'%'; };
-    await new Promise((res,rej)=>{ xhr.onload=()=>xhr.status<300?res():rej(new Error('Upload failed: '+xhr.status)); xhr.onerror=()=>rej(new Error('Network error')); xhr.send(file); });
-    barEl.style.width='100%';
-    const publicUrl=`${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
-    pendingMediaUrl=publicUrl;
-    document.getElementById('img-url').value=publicUrl;
-    document.getElementById('img-url-wrap').style.display='flex';
-    renderPendingMediaPreview('composer-preview', publicUrl, pendingMediaSendAsLink);
-    labelEl.textContent='Ready to send: '+file.name + (pendingMediaSendAsLink ? ' (will send link)' : '');
-    setTimeout(()=>{statusEl.style.display='none';barEl.style.width='0%';},2500);
-    document.getElementById('msg-input').focus();
-  } catch(e) {
-    labelEl.textContent='Upload failed: '+e.message; barEl.style.background='#ff453a';
-    setTimeout(()=>{statusEl.style.display='none';barEl.style.background='#2563eb';barEl.style.width='0%';},3000);
+  statusEl.style.display='flex'; barEl.style.width='10%'; labelEl.textContent='Uploading '+files.length+' file(s)…';
+  for (const file of files) {
+    const kind = (file.type && file.type.startsWith('video/')) ? 'video' : 'image';
+    const ext=file.name.split('.').pop();
+    const filename=Date.now()+'_'+Math.random().toString(36).slice(2)+'.'+ext;
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${filename}`);
+      xhr.setRequestHeader('Authorization','Bearer '+SUPABASE_KEY);
+      xhr.setRequestHeader('x-upsert','true');
+      xhr.upload.onprogress = e => { if(e.lengthComputable) barEl.style.width=Math.round(e.loaded/e.total*90)+'%'; };
+      await new Promise((res,rej)=>{ xhr.onload=()=>xhr.status<300?res():rej(new Error('Upload failed: '+xhr.status)); xhr.onerror=()=>rej(new Error('Network error')); xhr.send(file); });
+      barEl.style.width='100%';
+      const publicUrl=`${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
+      addPendingMediaItem('composer', publicUrl, kind);
+      document.getElementById('img-url').value='';
+      document.getElementById('img-url-wrap').style.display='none';
+      renderPendingMediaPreview('composer-preview', 'composer');
+      labelEl.textContent='Added: '+file.name + (kind === 'video' ? ' (will send link)' : '');
+    } catch(e) {
+      labelEl.textContent='Upload failed: '+e.message; barEl.style.background='#ff453a';
+    }
   }
+  setTimeout(()=>{statusEl.style.display='none';barEl.style.background='#2563eb';barEl.style.width='0%';},2500);
+  document.getElementById('msg-input').focus();
 }
 function clearImgUrl() {
-  pendingMediaUrl=null;
-  pendingMediaSendAsLink=false;
+  pendingMediaItems = [];
   const el=document.getElementById('img-url'); if(el)el.value='';
   const wrap=document.getElementById('img-url-wrap'); if(wrap)wrap.style.display='none';
-  renderPendingMediaPreview('composer-preview', '', false);
+  renderPendingMediaPreview('composer-preview', 'composer');
 }
 
 // ── LIGHTBOX ──
@@ -2331,9 +2380,16 @@ function hideLoading() { document.getElementById('loading-overlay').classList.ad
 document.getElementById('msg-input').addEventListener('input', function() { this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px'; });
 document.getElementById('msg-input').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();} });
 document.getElementById('messages').addEventListener('scroll', () => { if(activeIdx>=0) scrollPositions[activeIdx]=document.getElementById('messages').scrollTop; });
-document.getElementById('img-url')?.addEventListener('input', () => {
+document.getElementById('img-url')?.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
   const url = document.getElementById('img-url').value.trim();
-  renderPendingMediaPreview('composer-preview', url, pendingMediaSendAsLink);
+  if (!url) return;
+  addPendingMediaItem('composer', url, inferMediaKind(url, false));
+  document.getElementById('img-url').value = '';
+  const wrap = document.getElementById('img-url-wrap');
+  if (wrap) wrap.style.display = 'none';
+  renderPendingMediaPreview('composer-preview', 'composer');
 });
 
 (function initInsightsListeners() {
