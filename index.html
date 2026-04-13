@@ -769,6 +769,8 @@ let chatCache = {};
 let scrollPositions = {};
 let pendingMediaItems = [];
 let massMsgMediaItems = [];
+/** Digits-only keys for numbers the user deleted; inbound auto-add skips these until manual add. */
+let dismissedPhoneKeys = new Set();
 let vaultItems = [];
 let vaultSections = [];
 let vaultUiSectionId = null;
@@ -1076,7 +1078,7 @@ async function selectModel(m) {
 }
 function goToModels() {
   stopAllPollers();
-  contacts = []; contactGroups = []; activeIdx = -1; lastSids = {}; chatCache = {};
+  contacts = []; contactGroups = []; activeIdx = -1; lastSids = {}; chatCache = {}; dismissedPhoneKeys = new Set();
   sidebarTab = 'chats'; expandedGroupId = null; editingGroupId = null;
   document.getElementById('app').classList.remove('chat-open');
   document.getElementById('app').classList.remove('visible');
@@ -1103,6 +1105,48 @@ async function showModelsScreen() {
 }
 
 // ── CONTACTS (scoped to model) ──
+function phoneKey(n) {
+  return String(n || '').replace(/\D/g, '');
+}
+async function loadDismissedPhoneKeysFromDB() {
+  dismissedPhoneKeys = new Set();
+  if (!currentModel || !getUserId()) return;
+  const token = getAccessToken();
+  const data = await sbGet('/rest/v1/model_dismissed_contacts', {
+    select: 'phone_key',
+    model_id: 'eq.' + currentModel.id,
+    user_id: 'eq.' + getUserId()
+  }, token);
+  if (Array.isArray(data)) {
+    data.forEach(r => {
+      if (r.phone_key != null && r.phone_key !== '') dismissedPhoneKeys.add(String(r.phone_key));
+    });
+  }
+}
+async function persistDismissedPhoneKey(num) {
+  const pk = phoneKey(num);
+  if (!pk || !currentModel || !getUserId()) return;
+  const token = getAccessToken();
+  const r = await fetch(SUPABASE_URL + '/rest/v1/model_dismissed_contacts', {
+    method: 'POST',
+    headers: { ...sbHeaders(token), Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      user_id: getUserId(),
+      model_id: currentModel.id,
+      phone_key: pk
+    })
+  });
+  if (r.ok) dismissedPhoneKeys.add(pk);
+  else console.warn('model_dismissed_contacts insert failed', r.status, await r.text());
+}
+async function removeDismissedPhoneKey(num) {
+  const pk = phoneKey(num);
+  if (!pk || !currentModel || !getUserId()) return;
+  const token = getAccessToken();
+  const q = 'user_id=eq.' + encodeURIComponent(getUserId()) + '&model_id=eq.' + encodeURIComponent(currentModel.id) + '&phone_key=eq.' + encodeURIComponent(pk);
+  await sbDelete('/rest/v1/model_dismissed_contacts?' + q, token);
+  dismissedPhoneKeys.delete(pk);
+}
 async function loadContactsFromDB() {
   const userId = getUserId();
   const data = await sbGet('/rest/v1/contacts', { select: '*', model_id: 'eq.' + currentModel.id, user_id: 'eq.' + userId, order: 'created_at.asc' });
@@ -1785,6 +1829,7 @@ async function loadCachedMessages(contactNum) {
 async function initChat() {
   setLoading('Loading chats…');
   await loadContactsFromDB();
+  await loadDismissedPhoneKeysFromDB();
   await loadContactGroupsFromDB();
   contacts.forEach((_, i) => { lastSids[i] = new Set(); });
   await preloadAllChats();
@@ -2101,7 +2146,10 @@ async function checkForNewSenders() {
     if (!data.messages) return;
     for (const msg of data.messages) {
       const senderNum = msg.from;
-      if (!senderNum || contacts.some(c => c.num === senderNum)) continue;
+      const sk = phoneKey(senderNum);
+      if (!senderNum) continue;
+      if (contacts.some(c => phoneKey(c.num) === sk || c.num === senderNum)) continue;
+      if (dismissedPhoneKeys.has(sk)) continue;
       const newC = {name:'', num:senderNum, lastMsg:msg.body||'', lastTime:msg.date_sent||msg.date_created};
       const dbId = await saveContactToDB(newC);
       newC.id = dbId;
@@ -2122,6 +2170,7 @@ async function addContact() {
   const name = document.getElementById('new-name').value.trim();
   const num = document.getElementById('new-num').value.trim();
   if (!num) return;
+  await removeDismissedPhoneKey(num);
   const newC = {name, num, lastMsg:'', lastTime:null};
   const dbId = await saveContactToDB(newC);
   newC.id = dbId;
@@ -2136,6 +2185,7 @@ async function deleteChat(idx) {
   const c = contacts[idx];
   const userId = getUserId();
   const token = currentUser?.access_token;
+  await persistDismissedPhoneKey(c.num);
   if (c.id) {
     await deleteContactFromGroupMembersDB(c.id);
     await deleteContactFromDB(c.id);
