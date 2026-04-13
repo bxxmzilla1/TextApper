@@ -97,8 +97,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .group-back-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .group-row { display: flex; align-items: center; gap: 11px; padding: 11px 14px; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid #222224; position: relative; padding-right: 72px; }
 .group-row:hover { background: #252527; }
+.group-row .chat-item-delete {
+  display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: #ff453a; border: none; color: #fff; border-radius: 7px; font-size: 11px; padding: 4px 8px; cursor: pointer;
+}
 .group-row:hover .chat-item-delete { display: block; }
-.group-row .chat-item-delete { display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
 .group-item-meta { font-size: 12px; color: #8e8e93; margin-top: 2px; }
 .empty-side { padding: 20px 16px; text-align: center; color: #636366; font-size: 14px; }
 .group-member-picker { max-height: min(240px, 42vh); overflow-y: auto; background: #2c2c2e; border-radius: 10px; padding: 4px; margin-top: 4px; }
@@ -128,9 +131,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .needs-reply .chat-item-reply-dot { box-shadow: 0 0 0 2px rgba(51, 144, 236, 0.25), 0 0 10px rgba(51, 144, 236, 0.45); }
 .chat-item-phone { font-size: 11px; color: #636366; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-item-preview { font-size: 12px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-.chat-item-delete { display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #ff453a; border: none; color: #fff; border-radius: 7px; font-size: 11px; padding: 4px 8px; cursor: pointer; }
-.chat-item:hover .chat-item-delete { display: block; }
-.chat-item:hover .chat-item-time { visibility: hidden; }
 .add-chat-btn { margin: 10px; margin-bottom: max(10px, env(safe-area-inset-bottom)); padding: 10px; background: #2c2c2e; border: none; border-radius: 10px; color: #2563eb; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
 .add-chat-btn:hover { background: #3a3a3c; }
 
@@ -406,7 +406,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <p id="group-modal-hint" style="color:#636366;font-size:12px;margin-top:8px;">Choose contacts to include. You can change this anytime.</p>
     <div class="modal-actions">
       <button type="button" class="btn-sec" onclick="closeGroupModal()">Cancel</button>
-      <button type="button" class="btn-primary" style="margin-top:0;" onclick="saveGroupFromModal()">Save</button>
+      <button type="button" class="btn-primary group-save-btn" style="margin-top:0;" onclick="saveGroupFromModal()">Save</button>
     </div>
   </div>
 </div>
@@ -439,6 +439,7 @@ let contactGroups = [];
 let sidebarTab = 'chats';
 let expandedGroupId = null;
 let editingGroupId = null;
+let groupModalSaveLock = false;
 let activeIdx = -1;
 let intervals = {};
 let lastSids = {};
@@ -717,7 +718,13 @@ async function loadContactGroupsFromDB() {
     if (data && data.message) console.warn('contact_groups:', data.message);
     return;
   }
-  const groups = data.map(r => ({ id: r.id, name: r.name || '', memberIds: new Set() }));
+  const seen = new Set();
+  const groups = [];
+  for (const r of data) {
+    if (!r || !r.id || seen.has(r.id)) continue;
+    seen.add(r.id);
+    groups.push({ id: r.id, name: r.name || '', memberIds: new Set() });
+  }
   if (!groups.length) {
     contactGroups = groups;
     return;
@@ -882,27 +889,37 @@ function closeGroupModal() {
 }
 
 async function saveGroupFromModal() {
+  if (groupModalSaveLock) return;
   const name = document.getElementById('group-name-input').value.trim();
   if (!name) return;
+  const editingId = editingGroupId;
   const ids = [...document.querySelectorAll('#group-members-checkboxes .gmb-cb:checked')]
     .map(el => el.dataset.contactId)
     .filter(Boolean);
-  if (editingGroupId) {
-    await updateGroupNameInDB(editingGroupId, name);
-    await saveGroupMembersToDB(editingGroupId, ids);
-  } else {
-    const newId = await createGroupInDB(name);
-    if (!newId) {
-      console.warn('Failed to create group');
-      return;
+  groupModalSaveLock = true;
+  const saveBtn = document.querySelector('#group-modal .group-save-btn');
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    if (editingId) {
+      await updateGroupNameInDB(editingId, name);
+      await saveGroupMembersToDB(editingId, ids);
+    } else {
+      const newId = await createGroupInDB(name);
+      if (!newId) {
+        console.warn('Failed to create group');
+        return;
+      }
+      await saveGroupMembersToDB(newId, ids);
     }
-    await saveGroupMembersToDB(newId, ids);
+    await loadContactGroupsFromDB();
+    closeGroupModal();
+    updateGroupBackBar();
+    updateSidebarFooterBtn();
+    refreshSidebarList();
+  } finally {
+    groupModalSaveLock = false;
+    if (saveBtn) saveBtn.disabled = false;
   }
-  await loadContactGroupsFromDB();
-  closeGroupModal();
-  updateGroupBackBar();
-  updateSidebarFooterBtn();
-  refreshSidebarList();
 }
 
 async function deleteGroupConfirm(id) {
@@ -1056,8 +1073,7 @@ function renderGroupMembersList() {
         </div>
         ${phoneRow}
         <div class="chat-item-preview">${previewEsc}</div>
-      </div>
-      <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat(${i})">Delete</button>`;
+      </div>`;
     list.appendChild(div);
   });
   if (!shown) {
@@ -1093,8 +1109,7 @@ function renderChatList() {
         </div>
         ${phoneRow}
         <div class="chat-item-preview">${previewEsc}</div>
-      </div>
-      <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat(${i})">Delete</button>`;
+      </div>`;
     list.appendChild(div);
   });
 }
