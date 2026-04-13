@@ -661,6 +661,8 @@ let chatCache = {};
 let scrollPositions = {};
 let pendingMediaUrl = null;
 let massMsgMediaUrl = null;
+let pendingMediaSendAsLink = false;
+let massMsgMediaSendAsLink = false;
 let massSendLock = false;
 let editingModelId = null;
 let inboundCheckInterval = null;
@@ -1963,6 +1965,7 @@ function openMassMsgModal() {
   document.getElementById('mass-msg-modal').style.display = 'flex';
   document.getElementById('mass-msg-body').value = '';
   massMsgMediaUrl = null;
+  massMsgMediaSendAsLink = false;
   document.getElementById('mass-msg-img-url').value = '';
   document.getElementById('mass-msg-img-wrap').style.display = 'none';
   const uh = document.getElementById('mass-msg-upload-hint');
@@ -2011,6 +2014,7 @@ function closeMassMsgModal() {
 
 function clearMassMsgMedia() {
   massMsgMediaUrl = null;
+  massMsgMediaSendAsLink = false;
   document.getElementById('mass-msg-img-url').value = '';
   document.getElementById('mass-msg-img-wrap').style.display = 'none';
 }
@@ -2057,6 +2061,7 @@ async function uploadMassMsgFile(input) {
   const hint = document.getElementById('mass-msg-upload-hint');
   hint.style.display = 'block';
   hint.textContent = 'Uploading ' + file.name + '…';
+  massMsgMediaSendAsLink = !!(file.type && file.type.startsWith('video/'));
   const ext = file.name.split('.').pop();
   const filename = Date.now() + '_' + Math.random().toString(36).slice(2) + '.' + ext;
   try {
@@ -2073,7 +2078,7 @@ async function uploadMassMsgFile(input) {
     massMsgMediaUrl = publicUrl;
     document.getElementById('mass-msg-img-url').value = publicUrl;
     document.getElementById('mass-msg-img-wrap').style.display = 'flex';
-    hint.textContent = 'Ready: ' + file.name;
+    hint.textContent = 'Ready: ' + file.name + (massMsgMediaSendAsLink ? ' (will send link)' : '');
     setTimeout(() => { hint.style.display = 'none'; }, 2200);
   } catch (e) {
     hint.textContent = 'Upload failed';
@@ -2084,8 +2089,11 @@ async function uploadMassMsgFile(input) {
 async function runMassSend() {
   if (massSendLock) return;
   const body = document.getElementById('mass-msg-body').value.trim();
-  const imgUrl = massMsgMediaUrl || (document.getElementById('mass-msg-img-url').value || '').trim() || '';
-  if (!body && !imgUrl) {
+  const uploadedUrl = massMsgMediaUrl || (document.getElementById('mass-msg-img-url').value || '').trim() || '';
+  const linkMode = !!(massMsgMediaSendAsLink && uploadedUrl);
+  const mediaUrl = linkMode ? '' : uploadedUrl;
+  const combinedBody = linkMode ? (body ? (body + '\n' + uploadedUrl) : uploadedUrl) : body;
+  if (!combinedBody && !mediaUrl) {
     showToast('Mass message', 'Add text or media.');
     return;
   }
@@ -2104,7 +2112,7 @@ async function runMassSend() {
   for (let i = 0; i < rec.length; i++) {
     const { idx, c } = rec[i];
     prog.textContent = 'Sending ' + (i + 1) + '/' + rec.length + '…';
-    const res = await twilioPostMessage(c.num, body, imgUrl || undefined);
+    const res = await twilioPostMessage(c.num, combinedBody, mediaUrl || undefined);
     if (!res.ok) {
       fail++;
       continue;
@@ -2114,9 +2122,9 @@ async function runMassSend() {
     const optMsg = {
       sid: d.sid,
       direction: 'outbound-api',
-      body: d.body || body,
-      num_media: imgUrl ? 1 : 0,
-      media_url: imgUrl || null,
+      body: d.body || combinedBody,
+      num_media: mediaUrl ? 1 : 0,
+      media_url: mediaUrl || null,
       date_sent: d.date_created || new Date().toISOString(),
       date_created: d.date_created || new Date().toISOString()
     };
@@ -2126,7 +2134,7 @@ async function runMassSend() {
       if (!chatCache[c.num]) chatCache[c.num] = [];
       chatCache[c.num].push(optMsg);
       cacheSingleMessage(c.num, optMsg);
-      const previewBit = imgUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40);
+      const previewBit = linkMode ? (body ? body.slice(0, 40) : '[Video link]') : (mediaUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
       contacts[idx].lastMsg = 'You: ' + previewBit;
       contacts[idx].lastTime = optMsg.date_sent;
       saveContactToDB(contacts[idx]);
@@ -2148,23 +2156,26 @@ async function runMassSend() {
 
 async function sendMsg() {
   const body = document.getElementById('msg-input').value.trim();
-  const imgUrl = pendingMediaUrl || document.getElementById('img-url').value.trim() || '';
-  if (!body && !imgUrl) return;
+  const uploadedUrl = pendingMediaUrl || document.getElementById('img-url').value.trim() || '';
+  const linkMode = !!(pendingMediaSendAsLink && uploadedUrl);
+  const mediaUrl = linkMode ? '' : uploadedUrl;
+  const combinedBody = linkMode ? (body ? (body + '\n' + uploadedUrl) : uploadedUrl) : body;
+  if (!combinedBody && !mediaUrl) return;
   if (activeIdx < 0 || !currentModel) return;
   const c = contacts[activeIdx];
-  const res = await twilioPostMessage(c.num, body, imgUrl || undefined);
+  const res = await twilioPostMessage(c.num, combinedBody, mediaUrl || undefined);
   if (!res.ok) return;
   const d = res.d;
   document.getElementById('msg-input').value = '';
   document.getElementById('msg-input').style.height = 'auto';
   clearImgUrl();
-  const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || body, num_media: imgUrl ? 1 : 0, media_url: imgUrl || null, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
+  const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || combinedBody, num_media: mediaUrl ? 1 : 0, media_url: mediaUrl || null, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
   const area = document.getElementById('messages');
   appendMessageToDOM(area, optMsg, activeIdx);
   lastSids[activeIdx].add(d.sid);
   if (chatCache[c.num]) chatCache[c.num].push(optMsg);
   cacheSingleMessage(c.num, optMsg);
-  const previewBit = imgUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40);
+  const previewBit = linkMode ? (body ? body.slice(0, 40) : '[Video link]') : (mediaUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
   contacts[activeIdx].lastMsg = 'You: ' + previewBit;
   contacts[activeIdx].lastTime = optMsg.date_sent;
   saveContactToDB(contacts[activeIdx]);
@@ -2208,6 +2219,7 @@ async function uploadFile(input) {
   const file = input.files[0]; if (!file) return; input.value='';
   const statusEl=document.getElementById('upload-status'), barEl=document.getElementById('upload-bar'), labelEl=document.getElementById('upload-label');
   statusEl.style.display='flex'; barEl.style.width='10%'; labelEl.textContent='Uploading '+file.name+'…';
+  pendingMediaSendAsLink = !!(file.type && file.type.startsWith('video/'));
   const ext=file.name.split('.').pop();
   const filename=Date.now()+'_'+Math.random().toString(36).slice(2)+'.'+ext;
   try {
@@ -2222,7 +2234,7 @@ async function uploadFile(input) {
     pendingMediaUrl=publicUrl;
     document.getElementById('img-url').value=publicUrl;
     document.getElementById('img-url-wrap').style.display='flex';
-    labelEl.textContent='Ready to send: '+file.name;
+    labelEl.textContent='Ready to send: '+file.name + (pendingMediaSendAsLink ? ' (will send link)' : '');
     setTimeout(()=>{statusEl.style.display='none';barEl.style.width='0%';},2500);
     document.getElementById('msg-input').focus();
   } catch(e) {
@@ -2230,7 +2242,7 @@ async function uploadFile(input) {
     setTimeout(()=>{statusEl.style.display='none';barEl.style.background='#2563eb';barEl.style.width='0%';},3000);
   }
 }
-function clearImgUrl() { pendingMediaUrl=null; const el=document.getElementById('img-url'); if(el)el.value=''; const wrap=document.getElementById('img-url-wrap'); if(wrap)wrap.style.display='none'; }
+function clearImgUrl() { pendingMediaUrl=null; pendingMediaSendAsLink=false; const el=document.getElementById('img-url'); if(el)el.value=''; const wrap=document.getElementById('img-url-wrap'); if(wrap)wrap.style.display='none'; }
 
 // ── LIGHTBOX ──
 function openLightbox(src,isVideo,caption) {
