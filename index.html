@@ -1126,6 +1126,7 @@ async function loadDismissedPhoneKeysFromDB() {
 async function persistDismissedPhoneKey(num) {
   const pk = phoneKey(num);
   if (!pk || !currentModel || !getUserId()) return;
+  dismissedPhoneKeys.add(pk);
   const token = getAccessToken();
   const r = await fetch(SUPABASE_URL + '/rest/v1/model_dismissed_contacts', {
     method: 'POST',
@@ -1136,8 +1137,7 @@ async function persistDismissedPhoneKey(num) {
       phone_key: pk
     })
   });
-  if (r.ok) dismissedPhoneKeys.add(pk);
-  else console.warn('model_dismissed_contacts insert failed', r.status, await r.text());
+  if (!r.ok) console.warn('model_dismissed_contacts insert failed', r.status, await r.text());
 }
 async function removeDismissedPhoneKey(num) {
   const pk = phoneKey(num);
@@ -1151,6 +1151,7 @@ async function loadContactsFromDB() {
   const userId = getUserId();
   const data = await sbGet('/rest/v1/contacts', { select: '*', model_id: 'eq.' + currentModel.id, user_id: 'eq.' + userId, order: 'created_at.asc' });
   contacts = Array.isArray(data) ? data.map(r => ({ id: r.id, name: r.name||'', num: r.num, lastMsg: r.last_msg||'', lastTime: r.last_time||null })) : [];
+  contacts = contacts.filter(c => !dismissedPhoneKeys.has(phoneKey(c.num)));
 }
 async function saveContactToDB(c) {
   const userId = getUserId();
@@ -1173,6 +1174,8 @@ function showMainEmpty() {
   if (split) split.style.display = 'none';
   const cv = document.getElementById('chat-view');
   if (cv) cv.style.display = 'none';
+  const area = document.getElementById('messages');
+  if (area) area.innerHTML = '<p class="no-msgs">Select a conversation</p>';
   document.getElementById('app')?.classList.remove('insights-open');
   stopInsightsClock();
   clearTimeout(insightsSaveTimer);
@@ -1699,6 +1702,7 @@ function openGroupModal(gid) {
   let any = false;
   contacts.forEach(c => {
     if (!c.id) return;
+    if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
     any = true;
     const row = document.createElement('label');
     row.className = 'gmb-row';
@@ -1828,8 +1832,8 @@ async function loadCachedMessages(contactNum) {
 // ── CHAT INIT ──
 async function initChat() {
   setLoading('Loading chats…');
-  await loadContactsFromDB();
   await loadDismissedPhoneKeysFromDB();
+  await loadContactsFromDB();
   await loadContactGroupsFromDB();
   contacts.forEach((_, i) => { lastSids[i] = new Set(); });
   await preloadAllChats();
@@ -1889,6 +1893,7 @@ function renderGroupMembersList() {
   let shown = 0;
   contacts.forEach((c, i) => {
     if (!c.id || !g.memberIds.has(c.id)) return;
+    if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
     const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
     if (q && !hay.includes(q)) return;
     shown++;
@@ -1926,6 +1931,7 @@ function renderChatList() {
   const list = document.getElementById('chat-list');
   list.innerHTML = '';
   contacts.forEach((c, i) => {
+    if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
     const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
     if (q && !hay.includes(q)) return;
     const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
@@ -1970,10 +1976,12 @@ function backToChatList() {
 
 // ── OPEN CHAT ──
 async function openChat(idx) {
+  if (idx < 0 || idx >= contacts.length) return;
+  const c = contacts[idx];
+  if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
   const area = document.getElementById('messages');
   if (activeIdx >= 0 && activeIdx !== idx) scrollPositions[activeIdx] = area.scrollTop;
   activeIdx = idx;
-  const c = contacts[idx];
   const allMsgs = chatCache[c.num] || [];
 
   showMainChat();
@@ -2183,6 +2191,8 @@ async function deleteChat(idx) {
   if (!confirm('Delete this conversation?')) return;
   if (intervals[idx]) clearInterval(intervals[idx]);
   const c = contacts[idx];
+  const pk = phoneKey(c.num);
+  if (pk) dismissedPhoneKeys.add(pk);
   const userId = getUserId();
   const token = currentUser?.access_token;
   await persistDismissedPhoneKey(c.num);
@@ -2642,6 +2652,7 @@ function collectMassRecipients() {
   if (mode === 'all') {
     contacts.forEach((c, i) => {
       if (!c.num || seen.has(c.num)) return;
+      if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
       seen.add(c.num);
       out.push({ idx: i, c });
     });
@@ -2656,6 +2667,7 @@ function collectMassRecipients() {
       const idx = contacts.findIndex(ct => ct.id === cid);
       if (idx < 0) return;
       const c = contacts[idx];
+      if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
       if (!c.num || seen.has(c.num)) return;
       seen.add(c.num);
       out.push({ idx, c });
