@@ -2843,12 +2843,8 @@ function openLightbox(src,isVideo,caption) {
 }
 function closeLightbox() { document.getElementById('lightbox-video').pause(); document.getElementById('lightbox').classList.remove('open'); }
 
-// ── TOAST ──
-function showToast(title, preview) {
-  const t=document.createElement('div'); t.className='toast';
-  t.innerHTML=`<div><div style="font-weight:600;">${title}</div><div style="opacity:0.8;font-size:12px;margin-top:2px;">${preview}</div></div>`;
-  document.body.appendChild(t); setTimeout(()=>t.remove(),5000);
-}
+// ── TOAST ── (disabled — no popup notifications)
+function showToast(_title, _preview) {}
 
 // ── UI HELPERS ──
 function setLoading(text) { document.getElementById('loading-overlay').classList.remove('hidden'); document.getElementById('loading-text').textContent=text||'Loading…'; }
