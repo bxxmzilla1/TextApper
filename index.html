@@ -199,6 +199,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .chat-item-preview { font-size: 12px; color: #8e8e93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .add-chat-btn { margin: 10px; margin-bottom: max(10px, env(safe-area-inset-bottom)); padding: 10px; background: #2c2c2e; border: none; border-radius: 10px; color: #2563eb; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; }
 .add-chat-btn:hover { background: #3a3a3c; }
+.add-chat-btn:disabled { opacity: 0.5; cursor: default; color: #8e8e93; }
+.add-chat-btn:disabled:hover { background: #2c2c2e; }
 
 /* MAIN */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: #141416; }
@@ -473,6 +475,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <div class="sidebar-tabs" role="tablist">
         <button type="button" class="sidebar-tab active" id="tab-chats" onclick="setSidebarTab('chats')">Chats</button>
         <button type="button" class="sidebar-tab" id="tab-groups" onclick="setSidebarTab('groups')">Groups</button>
+        <button type="button" class="sidebar-tab" id="tab-archive" onclick="setSidebarTab('archive')">Archive</button>
       </div>
     </div>
     <div id="group-back-bar" class="group-back-bar" aria-hidden="true"></div>
@@ -496,6 +499,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
               <div class="chat-header-sub"><span class="live-dot"></span>live</div>
             </div>
             <button type="button" class="btn-icon insights-toggle-mobile" onclick="toggleInsightsPanel()" title="Insights">ℹ</button>
+            <button type="button" class="btn-icon" id="ch-btn-archive" onclick="archiveCurrentChat()" title="Archive chat" style="display:none">📦</button>
+            <button type="button" class="btn-icon" id="ch-btn-unarchive" onclick="unarchiveCurrentChat()" title="Unarchive chat" style="display:none">↩</button>
             <button class="btn-icon" onclick="openNicknameModal()" title="Edit nickname">✎</button>
             <button class="btn-icon danger" onclick="deleteCurrentChat()" title="Delete">🗑</button>
           </div>
@@ -912,6 +917,10 @@ function updateChatHeaderUI(idx) {
   else { numEl.textContent = ''; numEl.classList.remove('visible'); }
   const av = document.getElementById('ch-avatar');
   av.textContent = initials(nick, c.num); av.style.background = colorFor(idx);
+  const ba = document.getElementById('ch-btn-archive');
+  const bu = document.getElementById('ch-btn-unarchive');
+  if (ba) ba.style.display = c.archived ? 'none' : '';
+  if (bu) bu.style.display = c.archived ? '' : 'none';
 }
 function openNicknameModal() {
   if (activeIdx < 0 || !contacts[activeIdx]) return;
@@ -1084,14 +1093,15 @@ function goToModels() {
   document.getElementById('app').classList.remove('visible');
   showMainEmpty();
   document.getElementById('chat-list').innerHTML = '';
-  const tc = document.getElementById('tab-chats'), tg = document.getElementById('tab-groups');
+  const tc = document.getElementById('tab-chats'), tg = document.getElementById('tab-groups'), ta = document.getElementById('tab-archive');
   if (tc) tc.classList.add('active');
   if (tg) tg.classList.remove('active');
+  if (ta) ta.classList.remove('active');
   const si = document.getElementById('search-input');
   if (si) { si.value = ''; si.placeholder = 'Search contacts…'; }
   updateGroupBackBar();
   const fb = document.getElementById('sidebar-footer-btn');
-  if (fb) fb.textContent = '＋ New conversation';
+  if (fb) { fb.textContent = '＋ New conversation'; fb.disabled = false; }
   document.getElementById('models-screen').classList.remove('hidden');
 }
 async function showModelsScreen() {
@@ -1150,12 +1160,12 @@ async function removeDismissedPhoneKey(num) {
 async function loadContactsFromDB() {
   const userId = getUserId();
   const data = await sbGet('/rest/v1/contacts', { select: '*', model_id: 'eq.' + currentModel.id, user_id: 'eq.' + userId, order: 'created_at.asc' });
-  contacts = Array.isArray(data) ? data.map(r => ({ id: r.id, name: r.name||'', num: r.num, lastMsg: r.last_msg||'', lastTime: r.last_time||null })) : [];
+  contacts = Array.isArray(data) ? data.map(r => ({ id: r.id, name: r.name||'', num: r.num, lastMsg: r.last_msg||'', lastTime: r.last_time||null, archived: !!r.archived })) : [];
   contacts = contacts.filter(c => !dismissedPhoneKeys.has(phoneKey(c.num)));
 }
 async function saveContactToDB(c) {
   const userId = getUserId();
-  const body = { name: c.name||'', num: c.num, last_msg: c.lastMsg||'', last_time: c.lastTime||null, model_id: currentModel.id, user_id: userId };
+  const body = { name: c.name||'', num: c.num, last_msg: c.lastMsg||'', last_time: c.lastTime||null, model_id: currentModel.id, user_id: userId, archived: !!c.archived };
   if (c.id) body.id = c.id;
   const r = await fetch(SUPABASE_URL + '/rest/v1/contacts', {
     method: 'POST', headers: { ...sbHeaders(currentUser.access_token), 'Prefer': 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify(body)
@@ -1624,13 +1634,25 @@ async function deleteGroupFromDB(id) {
 
 function setSidebarTab(tab) {
   sidebarTab = tab;
-  if (tab === 'chats') expandedGroupId = null;
+  if (tab === 'chats' || tab === 'archive') expandedGroupId = null;
   const si = document.getElementById('search-input');
   if (si) si.value = '';
+  if (tab === 'chats' && activeIdx >= 0 && contacts[activeIdx]?.archived) {
+    activeIdx = -1;
+    showMainEmpty();
+    syncMobileChatPanel();
+  } else if (tab === 'archive' && activeIdx >= 0 && contacts[activeIdx] && !contacts[activeIdx].archived) {
+    activeIdx = -1;
+    showMainEmpty();
+    syncMobileChatPanel();
+  }
   document.getElementById('tab-chats').classList.toggle('active', tab === 'chats');
   document.getElementById('tab-groups').classList.toggle('active', tab === 'groups');
+  const ta = document.getElementById('tab-archive');
+  if (ta) ta.classList.toggle('active', tab === 'archive');
   if (si) {
     if (tab === 'chats') si.placeholder = 'Search contacts…';
+    else if (tab === 'archive') si.placeholder = 'Search archived…';
     else if (expandedGroupId) si.placeholder = 'Search in group…';
     else si.placeholder = 'Search groups…';
   }
@@ -1642,6 +1664,12 @@ function setSidebarTab(tab) {
 function updateSidebarFooterBtn() {
   const btn = document.getElementById('sidebar-footer-btn');
   if (!btn) return;
+  if (sidebarTab === 'archive') {
+    btn.textContent = 'Archived chats';
+    btn.disabled = true;
+    return;
+  }
+  btn.disabled = false;
   if (sidebarTab === 'chats') btn.textContent = '＋ New conversation';
   else if (expandedGroupId) btn.textContent = '✎ Edit group';
   else btn.textContent = '＋ New group';
@@ -1686,6 +1714,7 @@ function openExpandedGroup(gid) {
 }
 
 function sidebarFooterClick() {
+  if (sidebarTab === 'archive') return;
   if (sidebarTab === 'chats') openAddContactModal();
   else if (expandedGroupId) openGroupModal(expandedGroupId);
   else openGroupModal(null);
@@ -1874,10 +1903,11 @@ function contactAwaitingOurReply(c) {
   return !preview.startsWith('You: ');
 }
 
-// ── SIDEBAR: chats vs groups ──
+// ── SIDEBAR: chats vs groups vs archive ──
 function refreshSidebarList() {
   if (sidebarTab === 'groups' && expandedGroupId) renderGroupMembersList();
   else if (sidebarTab === 'groups') renderGroupsList();
+  else if (sidebarTab === 'archive') renderArchivedChatList();
   else renderChatList();
 }
 
@@ -1931,6 +1961,7 @@ function renderChatList() {
   const list = document.getElementById('chat-list');
   list.innerHTML = '';
   contacts.forEach((c, i) => {
+    if (c.archived) return;
     if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
     const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
     if (q && !hay.includes(q)) return;
@@ -1958,6 +1989,45 @@ function renderChatList() {
     list.appendChild(div);
   });
 }
+
+function renderArchivedChatList() {
+  const q = (document.getElementById('search-input').value || '').toLowerCase();
+  const list = document.getElementById('chat-list');
+  list.innerHTML = '';
+  let shown = 0;
+  contacts.forEach((c, i) => {
+    if (!c.archived) return;
+    if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
+    const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
+    if (q && !hay.includes(q)) return;
+    shown++;
+    const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
+    const previewEsc = (c.lastMsg || 'No messages yet').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const titleEsc = escapeHtml(contactDisplayName(c));
+    const phoneRow = contactHasNickname(c) ? `<div class="chat-item-phone">${escapeHtml(c.num)}</div>` : '';
+    const div = document.createElement('div');
+    const needsReply = contactAwaitingOurReply(c);
+    div.className = 'chat-item' + (i === activeIdx ? ' active' : '') + (needsReply ? ' needs-reply' : '');
+    div.onclick = () => openChat(i).catch(console.error);
+    div.innerHTML = `
+      <div class="chat-avatar" style="background:${colorFor(i)}">${initials(contactNameFirstLine(c.name), c.num)}</div>
+      <div class="chat-item-info">
+        <div class="chat-item-top">
+          <span class="chat-item-name">${titleEsc}</span>
+          <span class="chat-item-meta">
+            <span class="chat-item-time">${time}</span>
+            ${needsReply ? '<span class="chat-item-reply-dot" title="Send a reply to clear"></span>' : ''}
+          </span>
+        </div>
+        ${phoneRow}
+        <div class="chat-item-preview">${previewEsc}</div>
+      </div>`;
+    list.appendChild(div);
+  });
+  if (!shown) {
+    list.innerHTML = '<div class="empty-side">No archived chats. Open a chat and use Archive in the header to move it here.</div>';
+  }
+}
 function filterChats() { refreshSidebarList(); }
 
 function syncMobileChatPanel() {
@@ -1979,6 +2049,8 @@ async function openChat(idx) {
   if (idx < 0 || idx >= contacts.length) return;
   const c = contacts[idx];
   if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
+  if (sidebarTab === 'chats' && c.archived) return;
+  if (sidebarTab === 'archive' && !c.archived) return;
   const area = document.getElementById('messages');
   if (activeIdx >= 0 && activeIdx !== idx) scrollPositions[activeIdx] = area.scrollTop;
   activeIdx = idx;
@@ -2158,7 +2230,7 @@ async function checkForNewSenders() {
       if (!senderNum) continue;
       if (contacts.some(c => phoneKey(c.num) === sk || c.num === senderNum)) continue;
       if (dismissedPhoneKeys.has(sk)) continue;
-      const newC = {name:'', num:senderNum, lastMsg:msg.body||'', lastTime:msg.date_sent||msg.date_created};
+      const newC = {name:'', num:senderNum, lastMsg:msg.body||'', lastTime:msg.date_sent||msg.date_created, archived: false};
       const dbId = await saveContactToDB(newC);
       newC.id = dbId;
       contacts.push(newC);
@@ -2179,7 +2251,7 @@ async function addContact() {
   const num = document.getElementById('new-num').value.trim();
   if (!num) return;
   await removeDismissedPhoneKey(num);
-  const newC = {name, num, lastMsg:'', lastTime:null};
+  const newC = {name, num, lastMsg:'', lastTime:null, archived: false};
   const dbId = await saveContactToDB(newC);
   newC.id = dbId;
   contacts.push(newC);
@@ -2212,6 +2284,26 @@ async function deleteChat(idx) {
   refreshSidebarList(); startAllPollers();
 }
 function deleteCurrentChat() { if (activeIdx>=0) deleteChat(activeIdx); }
+
+async function archiveCurrentChat() {
+  if (activeIdx < 0 || !contacts[activeIdx]) return;
+  const c = contacts[activeIdx];
+  if (c.archived) return;
+  c.archived = true;
+  await saveContactToDB(c);
+  setSidebarTab('archive');
+  if (activeIdx >= 0) updateChatHeaderUI(activeIdx);
+}
+
+async function unarchiveCurrentChat() {
+  if (activeIdx < 0 || !contacts[activeIdx]) return;
+  const c = contacts[activeIdx];
+  if (!c.archived) return;
+  c.archived = false;
+  await saveContactToDB(c);
+  setSidebarTab('chats');
+  if (activeIdx >= 0) updateChatHeaderUI(activeIdx);
+}
 
 // ── VAULT ──
 async function registerVaultMedia(publicUrl, kind, caption, storagePath) {
@@ -2652,6 +2744,7 @@ function collectMassRecipients() {
   if (mode === 'all') {
     contacts.forEach((c, i) => {
       if (!c.num || seen.has(c.num)) return;
+      if (c.archived) return;
       if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
       seen.add(c.num);
       out.push({ idx: i, c });
@@ -2667,6 +2760,7 @@ function collectMassRecipients() {
       const idx = contacts.findIndex(ct => ct.id === cid);
       if (idx < 0) return;
       const c = contacts[idx];
+      if (c.archived) return;
       if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
       if (!c.num || seen.has(c.num)) return;
       seen.add(c.num);
