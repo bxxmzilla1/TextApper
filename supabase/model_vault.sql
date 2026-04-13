@@ -38,3 +38,7 @@ create policy "model_vault_sections_own" on public.model_vault_sections
 
 create policy "model_vault_items_own" on public.model_vault_items
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- Permanent delete from the app calls Storage DELETE on your bucket (e.g. `media`).
+-- In Supabase → Storage → `media` → Policies, ensure authenticated users can delete
+-- objects they uploaded (mirror your existing INSERT policy), or deletes will only remove DB rows.

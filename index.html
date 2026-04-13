@@ -154,6 +154,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .vault-move-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
 #vault-move-section { flex: 1; min-width: 120px; padding: 8px 10px; border-radius: 8px; border: none; background: #2c2c2e; color: #fff; font-size: 12px; }
 .vault-btn-move { padding: 8px 14px; border-radius: 8px; border: none; background: #3390ec; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.vault-btn-remove-section { padding: 8px 14px; border-radius: 8px; border: none; background: #48484a; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.vault-btn-delete-permanent { padding: 8px 14px; border-radius: 8px; border: none; background: #ff453a; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.vault-btn-delete-permanent:hover { filter: brightness(1.08); }
 .vault-grid-wrap { flex: 1; overflow-y: auto; padding: 12px; min-height: 0; }
 .vault-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
 .vault-tile { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; cursor: pointer; border: 2px solid transparent; background: #252527; }
@@ -709,6 +712,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
           <div class="vault-move-row">
             <select id="vault-move-section"></select>
             <button type="button" class="vault-btn-move" onclick="vaultMoveSelected()">Move to section</button>
+            <button type="button" id="vault-btn-remove-section" class="vault-btn-remove-section" style="display:none;" onclick="vaultRemoveFromSection()">Remove from section</button>
+            <button type="button" id="vault-btn-delete-permanent" class="vault-btn-delete-permanent" style="display:none;" onclick="vaultDeleteSelectedPermanent()">Delete permanently</button>
           </div>
         </div>
         <div class="vault-grid-wrap">
@@ -2165,6 +2170,52 @@ async function registerVaultMedia(publicUrl, kind, caption, storagePath) {
     await sbPost('/rest/v1/model_vault_items', row, token, 'return=minimal');
   } catch (e) { console.warn('Vault register failed', e); }
 }
+function vaultStoragePathFromItem(item) {
+  if (!item) return null;
+  if (item.storage_path && String(item.storage_path).trim()) return String(item.storage_path).trim();
+  const u = item.public_url || '';
+  const marker = '/object/public/';
+  const i = u.indexOf(marker);
+  if (i < 0) return null;
+  const rest = u.slice(i + marker.length);
+  const slash = rest.indexOf('/');
+  if (slash < 0) return null;
+  const bucketInUrl = rest.slice(0, slash);
+  const objectPath = rest.slice(slash + 1);
+  if (bucketInUrl !== BUCKET) return null;
+  try {
+    return decodeURIComponent(objectPath.split('?')[0].split('#')[0]);
+  } catch {
+    return objectPath.split('?')[0].split('#')[0];
+  }
+}
+async function deleteVaultStorageObject(relPath) {
+  if (!relPath) return true;
+  const token = getAccessToken() || SUPABASE_KEY;
+  const parts = String(relPath).split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  const url = `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${parts}`;
+  try {
+    const r = await fetch(url, { method: 'DELETE', headers: sbHeaders(token) });
+    if (!r.ok) console.warn('Vault storage delete failed', relPath, r.status);
+    return r.ok;
+  } catch (e) {
+    console.warn('Vault storage delete error', e);
+    return false;
+  }
+}
+function stripComposerAndMassByVaultUrls(urls) {
+  const set = new Set(urls.map(u => normalizeUrlForCompare(u)));
+  pendingMediaItems = pendingMediaItems.filter(x => !set.has(normalizeUrlForCompare(x.url)));
+  massMsgMediaItems = massMsgMediaItems.filter(x => !set.has(normalizeUrlForCompare(x.url)));
+  renderPendingMediaPreview('composer-preview', 'composer');
+  renderPendingMediaPreview('mass-preview', 'mass');
+}
+function updateVaultToolbarActions() {
+  const rm = document.getElementById('vault-btn-remove-section');
+  const del = document.getElementById('vault-btn-delete-permanent');
+  if (rm) rm.style.display = vaultUiSectionId ? 'inline-flex' : 'none';
+  if (del) del.style.display = vaultUiSectionId ? 'none' : 'inline-flex';
+}
 async function loadVaultData() {
   vaultItems = [];
   vaultSections = [];
@@ -2305,6 +2356,7 @@ function renderVaultUI() {
   fillVaultMoveSelect();
   renderVaultGrid();
   updateVaultSelectCount();
+  updateVaultToolbarActions();
   document.querySelectorAll('.vault-filter-pill').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-vf') === vaultFilter);
   });
@@ -2373,6 +2425,54 @@ async function vaultMoveSelected() {
   await loadVaultData();
   renderVaultUI();
   showToast('Vault', 'Moved.');
+}
+async function vaultRemoveFromSection() {
+  if (!vaultUiSectionId) return;
+  if (!vaultSelectedIds.size) return;
+  const token = getAccessToken();
+  const ids = [...vaultSelectedIds].filter(id => {
+    const it = vaultItems.find(x => x.id === id);
+    return it && it.section_id === vaultUiSectionId;
+  });
+  if (!ids.length) return;
+  for (const id of ids) {
+    const r = await sbPatch('/rest/v1/model_vault_items?id=eq.' + id, { section_id: null }, token, 'return=minimal');
+    if (!r.ok) {
+      await loadVaultData();
+      renderVaultUI();
+      return;
+    }
+  }
+  vaultSelectedIds.clear();
+  await loadVaultData();
+  renderVaultUI();
+}
+async function vaultDeleteSelectedPermanent() {
+  if (vaultUiSectionId !== null) return;
+  if (!vaultSelectedIds.size) return;
+  const n = vaultSelectedIds.size;
+  if (!confirm('Permanently delete ' + n + ' item(s)? They will be removed from the vault and from Supabase storage. This cannot be undone.')) return;
+  const token = getAccessToken();
+  const ids = [...vaultSelectedIds];
+  const pathsTried = new Set();
+  const urls = [];
+  for (const id of ids) {
+    const item = vaultItems.find(x => x.id === id);
+    if (!item) continue;
+    urls.push(item.public_url);
+    const path = vaultStoragePathFromItem(item);
+    if (path && !pathsTried.has(path)) {
+      pathsTried.add(path);
+      await deleteVaultStorageObject(path);
+    }
+  }
+  for (const id of ids) {
+    await sbDelete('/rest/v1/model_vault_items?id=eq.' + id, token);
+  }
+  stripComposerAndMassByVaultUrls(urls);
+  vaultSelectedIds.clear();
+  await loadVaultData();
+  renderVaultUI();
 }
 function vaultConfirmSelection() {
   if (!vaultSelectedIds.size) {
