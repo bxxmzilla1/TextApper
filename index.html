@@ -155,6 +155,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 #vault-move-section { flex: 1; min-width: 120px; padding: 8px 10px; border-radius: 8px; border: none; background: #2c2c2e; color: #fff; font-size: 12px; }
 .vault-btn-move { padding: 8px 14px; border-radius: 8px; border: none; background: #3390ec; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
 .vault-btn-remove-section { padding: 8px 14px; border-radius: 8px; border: none; background: #48484a; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.vault-btn-delete-section { padding: 8px 14px; border-radius: 8px; border: none; background: #5c2d2a; color: #ffb4ab; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid rgba(255, 69, 58, 0.35); }
+.vault-btn-delete-section:hover { filter: brightness(1.12); }
 .vault-btn-delete-permanent { padding: 8px 14px; border-radius: 8px; border: none; background: #ff453a; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
 .vault-btn-delete-permanent:hover { filter: brightness(1.08); }
 .vault-grid-wrap { flex: 1; overflow-y: auto; padding: 12px; min-height: 0; }
@@ -718,6 +720,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
             <select id="vault-move-section"></select>
             <button type="button" class="vault-btn-move" onclick="vaultMoveSelected()">Move to section</button>
             <button type="button" id="vault-btn-remove-section" class="vault-btn-remove-section" style="display:none;" onclick="vaultRemoveFromSection()">Remove from section</button>
+            <button type="button" id="vault-btn-delete-section" class="vault-btn-delete-section" style="display:none;" onclick="vaultDeleteCurrentSection()">Delete section</button>
             <button type="button" id="vault-btn-delete-permanent" class="vault-btn-delete-permanent" style="display:none;" onclick="vaultDeleteSelectedPermanent()">Delete permanently</button>
           </div>
         </div>
@@ -2378,8 +2381,10 @@ function stripComposerAndMassByVaultUrls(urls) {
 }
 function updateVaultToolbarActions() {
   const rm = document.getElementById('vault-btn-remove-section');
+  const delSec = document.getElementById('vault-btn-delete-section');
   const del = document.getElementById('vault-btn-delete-permanent');
   if (rm) rm.style.display = vaultUiSectionId ? 'inline-flex' : 'none';
+  if (delSec) delSec.style.display = vaultUiSectionId ? 'inline-flex' : 'none';
   if (del) del.style.display = vaultUiSectionId ? 'none' : 'inline-flex';
 }
 async function loadVaultData() {
@@ -2612,6 +2617,24 @@ async function vaultRemoveFromSection() {
   vaultSelectedIds.clear();
   await loadVaultData();
   renderVaultUI();
+}
+async function vaultDeleteCurrentSection() {
+  if (!vaultUiSectionId || !currentModel || !getUserId()) return;
+  const sec = vaultSections.find(s => s.id === vaultUiSectionId);
+  const label = sec ? String(sec.name) : '';
+  const msg = 'Delete this section? Items stay in the vault under All media (unfiled).' + (label ? '\n\nSection: ' + label : '');
+  if (!confirm(msg)) return;
+  const token = getAccessToken();
+  const ok = await sbDelete('/rest/v1/model_vault_sections?id=eq.' + vaultUiSectionId, token);
+  if (!ok) {
+    showToast('Vault', 'Could not delete section.');
+    return;
+  }
+  vaultUiSectionId = null;
+  vaultSelectedIds.clear();
+  await loadVaultData();
+  renderVaultUI();
+  showToast('Vault', 'Section deleted.');
 }
 async function vaultDeleteSelectedPermanent() {
   if (vaultUiSectionId !== null) return;
