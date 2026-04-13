@@ -1173,6 +1173,20 @@ async function saveContactToDB(c) {
   const data = await r.json();
   return Array.isArray(data) && data[0] ? data[0].id : c.id;
 }
+/** Updates preview line only — does not touch archived/name/num (avoids upsert races clearing archive). */
+async function patchContactLastActivity(c) {
+  if (!c?.id || !currentUser?.access_token) return;
+  const r = await sbPatch(
+    '/rest/v1/contacts?id=eq.' + encodeURIComponent(c.id),
+    { last_msg: c.lastMsg || '', last_time: c.lastTime || null },
+    currentUser.access_token,
+    'return=minimal'
+  );
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    console.warn('patchContactLastActivity', r.status, t);
+  }
+}
 async function deleteContactFromDB(id) {
   await sbDelete('/rest/v1/contacts?id=eq.' + encodeURIComponent(id), currentUser?.access_token);
 }
@@ -2198,7 +2212,7 @@ async function fetchAndCacheContact(idx) {
     const last = all[all.length-1];
     contacts[idx].lastMsg = (last.direction.startsWith('outbound')?'You: ':'')+(last.body||'').slice(0,40);
     contacts[idx].lastTime = last.date_sent||last.date_created;
-    saveContactToDB(contacts[idx]);
+    patchContactLastActivity(contacts[idx]);
     if (activeIdx !== idx) {
       refreshSidebarList();
       return;
@@ -2864,7 +2878,7 @@ async function runMassSend() {
         const previewBit = mediaUrls.length ? (body ? body.slice(0, 40) : '[Media]') : (combinedBody || '').slice(0, 40);
         contacts[idx].lastMsg = 'You: ' + previewBit;
         contacts[idx].lastTime = optMsg.date_sent;
-        saveContactToDB(contacts[idx]);
+        patchContactLastActivity(contacts[idx]);
         if (idx === activeIdx && document.getElementById('chat-view').style.display !== 'none') {
           const area = document.getElementById('messages');
           appendMessageToDOM(area, optMsg, idx);
@@ -2890,7 +2904,7 @@ async function runMassSend() {
         cacheSingleMessage(c.num, opt2);
         contacts[idx].lastMsg = 'You: ' + '[Video link]';
         contacts[idx].lastTime = opt2.date_sent;
-        saveContactToDB(contacts[idx]);
+        patchContactLastActivity(contacts[idx]);
         if (idx === activeIdx && document.getElementById('chat-view').style.display !== 'none') {
           const area = document.getElementById('messages');
           appendMessageToDOM(area, opt2, idx);
@@ -2934,7 +2948,7 @@ async function sendMsg() {
     const previewBit = mediaUrls.length ? (body ? body.slice(0, 40) : '[Media]') : (combinedBody || '').slice(0, 40);
     contacts[activeIdx].lastMsg = 'You: ' + previewBit;
     contacts[activeIdx].lastTime = optMsg.date_sent;
-    saveContactToDB(contacts[activeIdx]);
+    patchContactLastActivity(contacts[activeIdx]);
     refreshSidebarList();
     area.scrollTop = area.scrollHeight;
     await new Promise(r => setTimeout(r, 120));
@@ -2952,7 +2966,7 @@ async function sendMsg() {
     cacheSingleMessage(c.num, opt2);
     contacts[activeIdx].lastMsg = 'You: ' + '[Video link]';
     contacts[activeIdx].lastTime = opt2.date_sent;
-    saveContactToDB(contacts[activeIdx]);
+    patchContactLastActivity(contacts[activeIdx]);
     refreshSidebarList();
     area.scrollTop = area.scrollHeight;
     await new Promise(r => setTimeout(r, 120));
