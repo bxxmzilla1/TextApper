@@ -188,6 +188,28 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .loc-suggestions button:hover { background: #3a3a3c; }
 .ins-age-line { font-size: 12px; color: #8e8e93; margin-top: 4px; min-height: 16px; }
 .ins-local-time-line { font-size: 13px; color: #30d158; font-weight: 600; margin-top: 4px; word-break: break-word; }
+.ins-groups-section { margin-bottom: 4px; }
+.ins-groups-current { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.ins-group-chip {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: #2c2c2e; border-radius: 8px; padding: 6px 8px 6px 10px;
+}
+.ins-group-chip-name { font-size: 13px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ins-group-chip-remove {
+  flex-shrink: 0; width: 28px; height: 28px; border: none; border-radius: 6px;
+  background: #3a3a3c; color: #ff453a; font-size: 18px; line-height: 1; cursor: pointer; padding: 0;
+}
+.ins-group-chip-remove:hover { background: #48484a; color: #ff6b6b; }
+.ins-groups-add-row { display: flex; gap: 8px; align-items: stretch; margin-top: 2px; }
+.ins-groups-add-row select { flex: 1; min-width: 0; }
+.insights-group-add-btn {
+  flex-shrink: 0; padding: 0 12px; border: none; border-radius: 9px; background: #2563eb; color: #fff;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.insights-group-add-btn:hover { background: #1d4ed8; }
+.insights-group-add-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ins-groups-empty { font-size: 12px; color: #8e8e93; padding: 4px 0; line-height: 1.35; }
+.ins-groups-hint { font-size: 11px; color: #636366; margin-top: 6px; }
 .insights-toggle-mobile { display: none; }
 .insights-close-mobile { display: none; }
 .insights-saved { font-size: 10px; color: #636366; font-weight: 500; }
@@ -426,6 +448,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
         </div>
         <div class="insights-scroll" id="insights-scroll">
           <div class="field"><label>Nickname</label><textarea id="ins-nickname" class="ins-grow" rows="1" maxlength="500" placeholder="Display name" autocomplete="off"></textarea></div>
+          <div class="field ins-groups-section" id="ins-groups-wrap">
+            <label>Groups</label>
+            <div id="ins-groups-current" class="ins-groups-current" aria-live="polite"></div>
+            <div class="ins-groups-add-row">
+              <select id="ins-groups-add-select"><option value="">Add to group…</option></select>
+              <button type="button" class="insights-group-add-btn" id="ins-groups-add-btn" onclick="insightsAddToSelectedGroup()">Add</button>
+            </div>
+            <p class="ins-groups-hint" id="ins-groups-hint"></p>
+          </div>
           <div class="field"><label>Birthday</label>
             <input type="date" id="ins-birthday"/>
             <div class="ins-age-line" id="ins-age-display"></div>
@@ -1109,6 +1140,7 @@ async function populateInsightsPanel(idx) {
   updateInsightsLocalTimeDisplay();
   startInsightsClock();
   insightsGrowAllInsightsTextareas();
+  await renderInsightsGroupsSection(c.id);
 }
 
 // ── CONTACT GROUPS (Supabase: contact_groups + contact_group_members) ──
@@ -1149,6 +1181,103 @@ async function loadContactGroupsFromDB() {
     });
   }
   contactGroups = groups;
+}
+
+async function addGroupMemberToDB(groupId, contactId) {
+  await fetch(SUPABASE_URL + '/rest/v1/contact_group_members', {
+    method: 'POST',
+    headers: { ...sbHeaders(currentUser.access_token), 'Prefer': 'return=minimal' },
+    body: JSON.stringify({ group_id: groupId, contact_id: contactId })
+  });
+}
+
+async function removeGroupMemberFromDB(groupId, contactId) {
+  const path = '/rest/v1/contact_group_members?group_id=eq.' + encodeURIComponent(groupId) + '&contact_id=eq.' + encodeURIComponent(contactId);
+  await sbDelete(path, currentUser?.access_token);
+}
+
+async function renderInsightsGroupsSection(contactId) {
+  const host = document.getElementById('ins-groups-current');
+  const sel = document.getElementById('ins-groups-add-select');
+  const btn = document.getElementById('ins-groups-add-btn');
+  const hint = document.getElementById('ins-groups-hint');
+  if (!host || !sel) return;
+  if (!contactId) {
+    host.innerHTML = '';
+    sel.innerHTML = '<option value="">Add to group…</option>';
+    if (btn) btn.disabled = true;
+    if (hint) hint.textContent = '';
+    return;
+  }
+  if (!contactGroups.length) {
+    host.innerHTML = '';
+    const ng = document.createElement('div');
+    ng.className = 'ins-groups-empty';
+    ng.textContent = 'No groups yet. Create one under the Groups tab.';
+    host.appendChild(ng);
+    sel.innerHTML = '<option value="">—</option>';
+    sel.disabled = true;
+    if (btn) btn.disabled = true;
+    if (hint) hint.textContent = '';
+    return;
+  }
+  sel.disabled = false;
+  const memberOf = contactGroups.filter(g => g.memberIds.has(contactId));
+  host.innerHTML = '';
+  if (!memberOf.length) {
+    const empty = document.createElement('div');
+    empty.className = 'ins-groups-empty';
+    empty.textContent = 'Not in any group yet.';
+    host.appendChild(empty);
+  }
+  memberOf.forEach(g => {
+    const row = document.createElement('div');
+    row.className = 'ins-group-chip';
+    const span = document.createElement('span');
+    span.className = 'ins-group-chip-name';
+    span.textContent = g.name;
+    const rbtn = document.createElement('button');
+    rbtn.type = 'button';
+    rbtn.className = 'ins-group-chip-remove';
+    rbtn.textContent = '×';
+    rbtn.title = 'Remove from this group';
+    rbtn.addEventListener('click', () => insightsRemoveFromGroup(g.id, contactId));
+    row.appendChild(span);
+    row.appendChild(rbtn);
+    host.appendChild(row);
+  });
+  const available = contactGroups.filter(g => !g.memberIds.has(contactId));
+  sel.innerHTML = '<option value="">Add to group…</option>';
+  available.forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = g.name;
+    sel.appendChild(opt);
+  });
+  if (btn) btn.disabled = available.length === 0;
+  if (hint) hint.textContent = (!available.length && memberOf.length) ? 'In all groups.' : '';
+}
+
+async function insightsRemoveFromGroup(groupId, contactId) {
+  await removeGroupMemberFromDB(groupId, contactId);
+  const g = contactGroups.find(x => x.id === groupId);
+  if (g) g.memberIds.delete(contactId);
+  await renderInsightsGroupsSection(contactId);
+  refreshSidebarList();
+}
+
+async function insightsAddToSelectedGroup() {
+  const sel = document.getElementById('ins-groups-add-select');
+  if (!sel || !sel.value || activeIdx < 0) return;
+  const c = contacts[activeIdx];
+  if (!c?.id) return;
+  const gid = sel.value;
+  await addGroupMemberToDB(gid, c.id);
+  const g = contactGroups.find(x => x.id === gid);
+  if (g) g.memberIds.add(c.id);
+  sel.value = '';
+  await renderInsightsGroupsSection(c.id);
+  refreshSidebarList();
 }
 
 async function deleteContactFromGroupMembersDB(contactId) {
@@ -1324,6 +1453,7 @@ async function saveGroupFromModal() {
     updateGroupBackBar();
     updateSidebarFooterBtn();
     refreshSidebarList();
+    if (activeIdx >= 0 && contacts[activeIdx]?.id) await renderInsightsGroupsSection(contacts[activeIdx].id);
   } finally {
     groupModalSaveLock = false;
     if (saveBtn) saveBtn.disabled = false;
@@ -1338,6 +1468,7 @@ async function deleteGroupConfirm(id) {
   updateGroupBackBar();
   updateSidebarFooterBtn();
   refreshSidebarList();
+  if (activeIdx >= 0 && contacts[activeIdx]?.id) await renderInsightsGroupsSection(contacts[activeIdx].id);
 }
 
 function renderGroupsList() {
