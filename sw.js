@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tipsfan-shell-v18';
+const CACHE_NAME = 'tipsfan-shell-v19';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {

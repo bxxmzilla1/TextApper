@@ -109,6 +109,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .gmb-row:hover { background: #3a3a3c; }
 .gmb-row input { width: 18px; height: 18px; flex-shrink: 0; accent-color: #2563eb; }
 .modal-box-scroll { max-height: 85vh; display: flex; flex-direction: column; }
+#mass-msg-modal .modal-box { max-width: 440px; max-height: 90vh; display: flex; flex-direction: column; }
+.mass-target-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.mass-target-option { display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+.mass-target-option input { width: 18px; height: 18px; accent-color: #2563eb; }
+#mass-groups-box { margin-bottom: 12px; }
+#mass-groups-list { max-height: 160px; overflow-y: auto; background: #2c2c2e; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.mass-group-row { display: flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+.mass-group-row:hover { background: #3a3a3c; }
+.mass-group-row input { width: 16px; height: 16px; flex-shrink: 0; accent-color: #2563eb; }
+.mass-grp-n { color: #8e8e93; font-size: 12px; }
+.mass-groups-empty { font-size: 12px; color: #8e8e93; padding: 8px; }
+#mass-msg-body { width: 100%; min-height: 72px; padding: 11px 13px; background: #2c2c2e; border: none; border-radius: 10px; color: #fff; font-size: 14px; font-family: inherit; resize: vertical; outline: none; }
+#mass-msg-body:focus { background: #3a3a3c; }
+#mass-msg-img-wrap { display: none; align-items: center; gap: 6px; margin-bottom: 8px; }
+#mass-msg-img-url { flex: 1; background: #2c2c2e; border: none; border-radius: 10px; padding: 8px 12px; font-size: 12px; color: #fff; outline: none; }
+.mass-recipient-count { font-size: 12px; color: #8e8e93; margin: 8px 0; }
+.mass-msg-progress { font-size: 12px; color: #30d158; margin-top: 8px; min-height: 18px; }
 #chat-list { flex: 1; overflow-y: auto; min-height: 0; }
 #chat-list::-webkit-scrollbar { width: 4px; }
 #chat-list::-webkit-scrollbar-thumb { background: #3a3a3c; border-radius: 4px; }
@@ -380,6 +397,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
           <span class="model-switcher-arrow">⇄</span>
         </button>
         <div class="sidebar-icons">
+          <button type="button" class="btn-icon" onclick="openMassMsgModal()" title="Mass message">📢</button>
           <button class="btn-icon" onclick="openAddContactModal()" title="New chat">✏</button>
         </div>
       </div>
@@ -567,6 +585,39 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   </div>
 </div>
 
+<!-- MASS MESSAGE MODAL -->
+<div id="mass-msg-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:628;align-items:center;justify-content:center;padding:16px;">
+  <div class="modal-box modal-box-scroll">
+    <h3>Mass message</h3>
+    <div class="mass-target-row">
+      <label class="mass-target-option"><input type="radio" name="mass-target" value="all" checked onchange="onMassTargetChange()"/> All chats (every contact)</label>
+      <label class="mass-target-option"><input type="radio" name="mass-target" value="groups" onchange="onMassTargetChange()"/> Selected groups only</label>
+    </div>
+    <div id="mass-groups-box" style="display:none;">
+      <div class="field" style="margin-bottom:6px;"><label>Groups</label></div>
+      <div id="mass-groups-list"></div>
+    </div>
+    <div class="field"><label>Message</label><textarea id="mass-msg-body" placeholder="Text (optional if you attach media)"></textarea></div>
+    <div id="mass-msg-img-wrap">
+      <input id="mass-msg-img-url" type="text" readonly placeholder="Media URL"/>
+      <button type="button" onclick="clearMassMsgMedia()" style="background:none;border:none;color:#636366;font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <label class="btn-attach" style="margin:0;" title="Upload image or video">
+        📎<input type="file" id="mass-msg-file" accept="image/*,video/*" style="display:none;" onchange="uploadMassMsgFile(this)"/>
+      </label>
+      <span style="font-size:12px;color:#8e8e93;">Attach image or video (optional)</span>
+    </div>
+    <p id="mass-msg-upload-hint" style="display:none;font-size:12px;color:#8e8e93;margin-bottom:8px;"></p>
+    <div class="mass-recipient-count" id="mass-recipient-count">Recipients: 0</div>
+    <div class="mass-msg-progress" id="mass-msg-progress"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-sec" onclick="closeMassMsgModal()">Cancel</button>
+      <button type="button" class="btn-primary mass-send-btn" style="margin-top:0;" onclick="runMassSend()">Send</button>
+    </div>
+  </div>
+</div>
+
 <!-- LIGHTBOX -->
 <div id="lightbox" onclick="closeLightbox()">
   <button id="lightbox-close" onclick="closeLightbox()">✕</button>
@@ -605,6 +656,8 @@ let lastSids = {};
 let chatCache = {};
 let scrollPositions = {};
 let pendingMediaUrl = null;
+let massMsgMediaUrl = null;
+let massSendLock = false;
 let editingModelId = null;
 let inboundCheckInterval = null;
 let isFetching = {};
@@ -1868,36 +1921,251 @@ async function deleteChat(idx) {
 function deleteCurrentChat() { if (activeIdx>=0) deleteChat(activeIdx); }
 
 // ── SEND ──
+async function twilioPostMessage(toNum, body, mediaUrl) {
+  if (!currentModel) return { ok: false, err: null };
+  const { twilio_sid: sid, twilio_auth: auth, twilio_number: fromNum } = currentModel;
+  try {
+    const fd = new FormData();
+    fd.append('From', fromNum);
+    fd.append('To', toNum);
+    fd.append('Body', body || '');
+    if (mediaUrl) fd.append('MediaUrl', mediaUrl);
+    const r = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages.json`), {
+      method: 'POST',
+      headers: { Authorization: 'Basic ' + btoa(sid + ':' + auth) },
+      body: fd
+    });
+    const d = await r.json();
+    if (d.error_code || d.code) return { ok: false, err: d };
+    return { ok: true, d };
+  } catch (e) {
+    return { ok: false, err: e };
+  }
+}
+
+function onMassTargetChange() {
+  const box = document.getElementById('mass-groups-box');
+  const mode = document.querySelector('input[name="mass-target"]:checked')?.value;
+  if (box) box.style.display = mode === 'groups' ? 'block' : 'none';
+  updateMassRecipientCount();
+}
+
+function openMassMsgModal() {
+  if (!currentModel) return;
+  if (!contacts.length) {
+    showToast('Mass message', 'Add contacts first.');
+    return;
+  }
+  document.getElementById('mass-msg-modal').style.display = 'flex';
+  document.getElementById('mass-msg-body').value = '';
+  massMsgMediaUrl = null;
+  document.getElementById('mass-msg-img-url').value = '';
+  document.getElementById('mass-msg-img-wrap').style.display = 'none';
+  const uh = document.getElementById('mass-msg-upload-hint');
+  if (uh) { uh.style.display = 'none'; uh.textContent = ''; }
+  document.getElementById('mass-msg-progress').textContent = '';
+  const allRadio = document.querySelector('input[name="mass-target"][value="all"]');
+  if (allRadio) allRadio.checked = true;
+  const list = document.getElementById('mass-groups-list');
+  list.innerHTML = '';
+  if (!contactGroups.length) {
+    const p = document.createElement('p');
+    p.className = 'mass-groups-empty';
+    p.textContent = 'No groups yet. Create groups in the Groups tab, or use "All chats".';
+    list.appendChild(p);
+  } else {
+    contactGroups.forEach(g => {
+      const lab = document.createElement('label');
+      lab.className = 'mass-group-row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'mass-group-cb';
+      cb.value = g.id;
+      cb.addEventListener('change', updateMassRecipientCount);
+      const span = document.createElement('span');
+      span.textContent = g.name + ' ';
+      const nspan = document.createElement('span');
+      nspan.className = 'mass-grp-n';
+      nspan.textContent = '(' + g.memberIds.size + ')';
+      lab.appendChild(cb);
+      lab.appendChild(span);
+      lab.appendChild(nspan);
+      list.appendChild(lab);
+    });
+  }
+  onMassTargetChange();
+  updateMassRecipientCount();
+}
+
+function closeMassMsgModal() {
+  document.getElementById('mass-msg-modal').style.display = 'none';
+  massMsgMediaUrl = null;
+  massSendLock = false;
+  const sendBtn = document.querySelector('.mass-send-btn');
+  if (sendBtn) sendBtn.disabled = false;
+}
+
+function clearMassMsgMedia() {
+  massMsgMediaUrl = null;
+  document.getElementById('mass-msg-img-url').value = '';
+  document.getElementById('mass-msg-img-wrap').style.display = 'none';
+}
+
+function collectMassRecipients() {
+  const mode = document.querySelector('input[name="mass-target"]:checked')?.value || 'all';
+  const seen = new Set();
+  const out = [];
+  if (mode === 'all') {
+    contacts.forEach((c, i) => {
+      if (!c.num || seen.has(c.num)) return;
+      seen.add(c.num);
+      out.push({ idx: i, c });
+    });
+    return out;
+  }
+  const groupIds = [...document.querySelectorAll('#mass-groups-list .mass-group-cb:checked')].map(cb => cb.value);
+  if (!groupIds.length) return [];
+  for (const gid of groupIds) {
+    const g = contactGroups.find(x => x.id === gid);
+    if (!g) continue;
+    g.memberIds.forEach(cid => {
+      const idx = contacts.findIndex(ct => ct.id === cid);
+      if (idx < 0) return;
+      const c = contacts[idx];
+      if (!c.num || seen.has(c.num)) return;
+      seen.add(c.num);
+      out.push({ idx, c });
+    });
+  }
+  return out;
+}
+
+function updateMassRecipientCount() {
+  const rec = collectMassRecipients();
+  const el = document.getElementById('mass-recipient-count');
+  if (el) el.textContent = 'Recipients: ' + rec.length + (rec.length === 1 ? ' contact' : ' contacts');
+}
+
+async function uploadMassMsgFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const hint = document.getElementById('mass-msg-upload-hint');
+  hint.style.display = 'block';
+  hint.textContent = 'Uploading ' + file.name + '…';
+  const ext = file.name.split('.').pop();
+  const filename = Date.now() + '_' + Math.random().toString(36).slice(2) + '.' + ext;
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${filename}`);
+    xhr.setRequestHeader('Authorization', 'Bearer ' + SUPABASE_KEY);
+    xhr.setRequestHeader('x-upsert', 'true');
+    await new Promise((res, rej) => {
+      xhr.onload = () => (xhr.status < 300 ? res() : rej(new Error('Upload failed')));
+      xhr.onerror = () => rej(new Error('Network error'));
+      xhr.send(file);
+    });
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
+    massMsgMediaUrl = publicUrl;
+    document.getElementById('mass-msg-img-url').value = publicUrl;
+    document.getElementById('mass-msg-img-wrap').style.display = 'flex';
+    hint.textContent = 'Ready: ' + file.name;
+    setTimeout(() => { hint.style.display = 'none'; }, 2200);
+  } catch (e) {
+    hint.textContent = 'Upload failed';
+    setTimeout(() => { hint.style.display = 'none'; }, 2800);
+  }
+}
+
+async function runMassSend() {
+  if (massSendLock) return;
+  const body = document.getElementById('mass-msg-body').value.trim();
+  const imgUrl = massMsgMediaUrl || (document.getElementById('mass-msg-img-url').value || '').trim() || '';
+  if (!body && !imgUrl) {
+    showToast('Mass message', 'Add text or media.');
+    return;
+  }
+  const rec = collectMassRecipients();
+  if (!rec.length) {
+    showToast('Mass message', 'No recipients. Select groups with members, or use All chats.');
+    return;
+  }
+  if (!confirm('Send to ' + rec.length + ' contact(s)?')) return;
+  massSendLock = true;
+  const prog = document.getElementById('mass-msg-progress');
+  const sendBtn = document.querySelector('.mass-send-btn');
+  if (sendBtn) sendBtn.disabled = true;
+  let ok = 0;
+  let fail = 0;
+  for (let i = 0; i < rec.length; i++) {
+    const { idx, c } = rec[i];
+    prog.textContent = 'Sending ' + (i + 1) + '/' + rec.length + '…';
+    const res = await twilioPostMessage(c.num, body, imgUrl || undefined);
+    if (!res.ok) {
+      fail++;
+      continue;
+    }
+    ok++;
+    const d = res.d;
+    const optMsg = {
+      sid: d.sid,
+      direction: 'outbound-api',
+      body: d.body || body,
+      num_media: imgUrl ? 1 : 0,
+      media_url: imgUrl || null,
+      date_sent: d.date_created || new Date().toISOString(),
+      date_created: d.date_created || new Date().toISOString()
+    };
+    if (idx >= 0 && contacts[idx] && contacts[idx].num === c.num) {
+      if (!lastSids[idx]) lastSids[idx] = new Set();
+      lastSids[idx].add(d.sid);
+      if (!chatCache[c.num]) chatCache[c.num] = [];
+      chatCache[c.num].push(optMsg);
+      cacheSingleMessage(c.num, optMsg);
+      const previewBit = imgUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40);
+      contacts[idx].lastMsg = 'You: ' + previewBit;
+      contacts[idx].lastTime = optMsg.date_sent;
+      saveContactToDB(contacts[idx]);
+      if (idx === activeIdx && document.getElementById('chat-view').style.display !== 'none') {
+        const area = document.getElementById('messages');
+        appendMessageToDOM(area, optMsg, idx);
+        area.scrollTop = area.scrollHeight;
+      }
+    }
+    await new Promise(r => setTimeout(r, 120));
+  }
+  const summary = 'Done: ' + ok + ' sent' + (fail ? ', ' + fail + ' failed' : '') + '.';
+  prog.textContent = summary;
+  refreshSidebarList();
+  massSendLock = false;
+  if (sendBtn) sendBtn.disabled = false;
+  showToast('Mass message', summary);
+}
+
 async function sendMsg() {
   const body = document.getElementById('msg-input').value.trim();
   const imgUrl = pendingMediaUrl || document.getElementById('img-url').value.trim() || '';
   if (!body && !imgUrl) return;
   if (activeIdx < 0 || !currentModel) return;
   const c = contacts[activeIdx];
-  const {twilio_sid:sid, twilio_auth:auth, twilio_number:fromNum} = currentModel;
-  try {
-    const fd = new FormData();
-    fd.append('From', fromNum); fd.append('To', c.num); fd.append('Body', body||'');
-    if (imgUrl) fd.append('MediaUrl', imgUrl);
-    const r = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages.json`), {
-      method:'POST', headers:{'Authorization':'Basic '+btoa(sid+':'+auth)}, body:fd
-    });
-    const d = await r.json();
-    if (d.error_code||d.code) return;
-    document.getElementById('msg-input').value=''; document.getElementById('msg-input').style.height='auto'; clearImgUrl();
-    const optMsg = { sid:d.sid, direction:'outbound-api', body:d.body||body, num_media:imgUrl?1:0, media_url:imgUrl||null, date_sent:d.date_created||new Date().toISOString(), date_created:d.date_created||new Date().toISOString() };
-    const area = document.getElementById('messages');
-    appendMessageToDOM(area, optMsg, activeIdx);
-    lastSids[activeIdx].add(d.sid);
-    if (chatCache[c.num]) chatCache[c.num].push(optMsg);
-    cacheSingleMessage(c.num, optMsg);
-    const previewBit = imgUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40);
-    contacts[activeIdx].lastMsg = 'You: ' + previewBit;
-    contacts[activeIdx].lastTime = optMsg.date_sent;
-    saveContactToDB(contacts[activeIdx]);
-    refreshSidebarList();
-    area.scrollTop = area.scrollHeight;
-  } catch(e) {}
+  const res = await twilioPostMessage(c.num, body, imgUrl || undefined);
+  if (!res.ok) return;
+  const d = res.d;
+  document.getElementById('msg-input').value = '';
+  document.getElementById('msg-input').style.height = 'auto';
+  clearImgUrl();
+  const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || body, num_media: imgUrl ? 1 : 0, media_url: imgUrl || null, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
+  const area = document.getElementById('messages');
+  appendMessageToDOM(area, optMsg, activeIdx);
+  lastSids[activeIdx].add(d.sid);
+  if (chatCache[c.num]) chatCache[c.num].push(optMsg);
+  cacheSingleMessage(c.num, optMsg);
+  const previewBit = imgUrl ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40);
+  contacts[activeIdx].lastMsg = 'You: ' + previewBit;
+  contacts[activeIdx].lastTime = optMsg.date_sent;
+  saveContactToDB(contacts[activeIdx]);
+  refreshSidebarList();
+  area.scrollTop = area.scrollHeight;
 }
 
 // ── TWILIO MEDIA ──
