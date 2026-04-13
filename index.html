@@ -283,6 +283,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .compose { background: #1c1c1e; border-top: 1px solid #2c2c2e; padding: 10px 14px; padding-bottom: max(10px, env(safe-area-inset-bottom)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }
 #img-url-wrap { display: none; align-items: center; gap: 6px; margin-bottom: 6px; }
 #img-url { flex: 1; background: #2c2c2e; border: none; border-radius: 10px; padding: 7px 12px; font-size: 13px; color: #fff; outline: none; }
+.pending-media-preview { display: none; margin: 6px 0 2px; background: #1f1f22; border: 1px solid #2c2c2e; border-radius: 12px; padding: 8px; }
+.pending-media-preview.open { display: block; }
+.pending-media-preview img, .pending-media-preview video { width: 100%; max-height: 220px; border-radius: 10px; display: block; object-fit: cover; background: #000; }
+.pending-media-preview .meta { margin-top: 6px; font-size: 12px; color: #8e8e93; display: flex; justify-content: space-between; gap: 10px; }
+.pending-media-preview .meta .type { color: #30d158; font-weight: 600; }
 .compose-inner { flex: 1; display: flex; flex-direction: column; }
 #msg-input { background: #2c2c2e; border: none; border-radius: 22px; padding: 10px 16px; font-size: 15px; font-family: inherit; color: #fff; resize: none; outline: none; max-height: 120px; line-height: 1.4; }
 #msg-input::placeholder { color: #48484a; }
@@ -448,6 +453,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
                 <input id="img-url" placeholder="Paste image/video URL…"/>
                 <button onclick="clearImgUrl()" style="background:none;border:none;color:#636366;font-size:18px;cursor:pointer;">✕</button>
               </div>
+              <div id="composer-preview" class="pending-media-preview" aria-label="Attachment preview"></div>
               <textarea id="msg-input" placeholder="Message" rows="1"></textarea>
             </div>
             <div class="compose-btns">
@@ -606,6 +612,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <input id="mass-msg-img-url" type="text" readonly placeholder="Media URL"/>
       <button type="button" onclick="clearMassMsgMedia()" style="background:none;border:none;color:#636366;font-size:18px;cursor:pointer;">✕</button>
     </div>
+    <div id="mass-preview" class="pending-media-preview" aria-label="Mass attachment preview"></div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
       <label class="btn-attach" style="margin:0;" title="Upload image or video">
         📎<input type="file" id="mass-msg-file" accept="image/*,video/*" style="display:none;" onchange="uploadMassMsgFile(this)"/>
@@ -663,6 +670,52 @@ let pendingMediaUrl = null;
 let massMsgMediaUrl = null;
 let pendingMediaSendAsLink = false;
 let massMsgMediaSendAsLink = false;
+
+function isLikelyVideoUrl(url) {
+  const u = (url || '').toLowerCase().split('?')[0].split('#')[0];
+  return u.endsWith('.mp4') || u.endsWith('.mov') || u.endsWith('.webm') || u.endsWith('.m4v') || u.endsWith('.ogg');
+}
+function isLikelyImageUrl(url) {
+  const u = (url || '').toLowerCase().split('?')[0].split('#')[0];
+  return u.endsWith('.png') || u.endsWith('.jpg') || u.endsWith('.jpeg') || u.endsWith('.gif') || u.endsWith('.webp') || u.endsWith('.bmp') || u.endsWith('.svg');
+}
+function renderPendingMediaPreview(containerId, url, forceVideo) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const clean = (url || '').trim();
+  if (!clean) { el.classList.remove('open'); el.innerHTML = ''; return; }
+  const video = !!(forceVideo || isLikelyVideoUrl(clean));
+  const image = !video && isLikelyImageUrl(clean);
+  el.classList.add('open');
+  el.innerHTML = '';
+  if (video) {
+    const v = document.createElement('video');
+    v.src = clean;
+    v.controls = true;
+    v.playsInline = true;
+    el.appendChild(v);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<span class="type">Video</span><span title="${escapeHtml(clean)}">${escapeHtml(clean)}</span>`;
+    el.appendChild(meta);
+    return;
+  }
+  if (image) {
+    const img = document.createElement('img');
+    img.src = clean;
+    img.alt = 'Attachment preview';
+    el.appendChild(img);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<span class="type">Image</span><span title="${escapeHtml(clean)}">${escapeHtml(clean)}</span>`;
+    el.appendChild(meta);
+    return;
+  }
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.innerHTML = `<span class="type">Link</span><span title="${escapeHtml(clean)}">${escapeHtml(clean)}</span>`;
+  el.appendChild(meta);
+}
 let massSendLock = false;
 let editingModelId = null;
 let inboundCheckInterval = null;
@@ -1968,6 +2021,7 @@ function openMassMsgModal() {
   massMsgMediaSendAsLink = false;
   document.getElementById('mass-msg-img-url').value = '';
   document.getElementById('mass-msg-img-wrap').style.display = 'none';
+  renderPendingMediaPreview('mass-preview', '', false);
   const uh = document.getElementById('mass-msg-upload-hint');
   if (uh) { uh.style.display = 'none'; uh.textContent = ''; }
   document.getElementById('mass-msg-progress').textContent = '';
@@ -2017,6 +2071,7 @@ function clearMassMsgMedia() {
   massMsgMediaSendAsLink = false;
   document.getElementById('mass-msg-img-url').value = '';
   document.getElementById('mass-msg-img-wrap').style.display = 'none';
+  renderPendingMediaPreview('mass-preview', '', false);
 }
 
 function collectMassRecipients() {
@@ -2078,6 +2133,7 @@ async function uploadMassMsgFile(input) {
     massMsgMediaUrl = publicUrl;
     document.getElementById('mass-msg-img-url').value = publicUrl;
     document.getElementById('mass-msg-img-wrap').style.display = 'flex';
+    renderPendingMediaPreview('mass-preview', publicUrl, massMsgMediaSendAsLink);
     hint.textContent = 'Ready: ' + file.name + (massMsgMediaSendAsLink ? ' (will send link)' : '');
     setTimeout(() => { hint.style.display = 'none'; }, 2200);
   } catch (e) {
@@ -2234,6 +2290,7 @@ async function uploadFile(input) {
     pendingMediaUrl=publicUrl;
     document.getElementById('img-url').value=publicUrl;
     document.getElementById('img-url-wrap').style.display='flex';
+    renderPendingMediaPreview('composer-preview', publicUrl, pendingMediaSendAsLink);
     labelEl.textContent='Ready to send: '+file.name + (pendingMediaSendAsLink ? ' (will send link)' : '');
     setTimeout(()=>{statusEl.style.display='none';barEl.style.width='0%';},2500);
     document.getElementById('msg-input').focus();
@@ -2242,7 +2299,13 @@ async function uploadFile(input) {
     setTimeout(()=>{statusEl.style.display='none';barEl.style.background='#2563eb';barEl.style.width='0%';},3000);
   }
 }
-function clearImgUrl() { pendingMediaUrl=null; pendingMediaSendAsLink=false; const el=document.getElementById('img-url'); if(el)el.value=''; const wrap=document.getElementById('img-url-wrap'); if(wrap)wrap.style.display='none'; }
+function clearImgUrl() {
+  pendingMediaUrl=null;
+  pendingMediaSendAsLink=false;
+  const el=document.getElementById('img-url'); if(el)el.value='';
+  const wrap=document.getElementById('img-url-wrap'); if(wrap)wrap.style.display='none';
+  renderPendingMediaPreview('composer-preview', '', false);
+}
 
 // ── LIGHTBOX ──
 function openLightbox(src,isVideo,caption) {
@@ -2268,6 +2331,10 @@ function hideLoading() { document.getElementById('loading-overlay').classList.ad
 document.getElementById('msg-input').addEventListener('input', function() { this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,120)+'px'; });
 document.getElementById('msg-input').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();} });
 document.getElementById('messages').addEventListener('scroll', () => { if(activeIdx>=0) scrollPositions[activeIdx]=document.getElementById('messages').scrollTop; });
+document.getElementById('img-url')?.addEventListener('input', () => {
+  const url = document.getElementById('img-url').value.trim();
+  renderPendingMediaPreview('composer-preview', url, pendingMediaSendAsLink);
+});
 
 (function initInsightsListeners() {
   const panel = document.getElementById('insights-panel');
