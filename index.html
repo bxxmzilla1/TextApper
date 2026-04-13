@@ -518,7 +518,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
             <button type="button" class="btn-icon" id="ch-btn-archive" onclick="archiveCurrentChat()" title="Archive chat" style="display:none">📦</button>
             <button type="button" class="btn-icon" id="ch-btn-unarchive" onclick="unarchiveCurrentChat()" title="Unarchive chat" style="display:none">↩</button>
             <button class="btn-icon" onclick="openNicknameModal()" title="Edit nickname">✎</button>
-            <button class="btn-icon danger" onclick="deleteCurrentChat()" title="Delete">🗑</button>
           </div>
           <div id="upload-status">
             <div id="upload-bar-wrap"><div id="upload-bar"></div></div>
@@ -2478,31 +2477,6 @@ async function addContact() {
   lastSids[i] = new Set();
   closeAddContactModal(); refreshSidebarList(); startPoller(i); openChat(i);
 }
-async function deleteChat(idx) {
-  if (!confirm('Delete this conversation?')) return;
-  if (intervals[idx]) clearInterval(intervals[idx]);
-  const c = contacts[idx];
-  const pk = phoneKey(c.num);
-  if (pk) dismissedPhoneKeys.add(pk);
-  const userId = getUserId();
-  const token = currentUser?.access_token;
-  await persistDismissedPhoneKey(c.num);
-  if (c.id) {
-    await deleteContactFromGroupMembersDB(c.id);
-    await deleteContactFromDB(c.id);
-  }
-  const cacheFilter = `contact_num=eq.${encodeURIComponent(c.num)}&model_id=eq.${encodeURIComponent(currentModel.id)}&user_id=eq.${encodeURIComponent(userId)}`;
-  await sbDelete(`/rest/v1/messages_cache?${cacheFilter}`, token);
-  await sbDelete(`/rest/v1/read_state?${cacheFilter}`, token);
-  delete chatCache[c.num];
-  contacts.splice(idx,1);
-  if (activeIdx===idx) { activeIdx=-1; showMainEmpty(); }
-  else if (activeIdx>idx) activeIdx--;
-  syncMobileChatPanel();
-  await loadContactGroupsFromDB();
-  refreshSidebarList(); startAllPollers();
-}
-function deleteCurrentChat() { if (activeIdx>=0) deleteChat(activeIdx); }
 
 async function archiveCurrentChat() {
   if (activeIdx < 0 || !contacts[activeIdx]) return;
