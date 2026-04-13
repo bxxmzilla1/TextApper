@@ -273,6 +273,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .media-img:hover { opacity: 0.88; }
 @keyframes fadeIn { to { opacity: 1; } }
 .media-video { width: min(220px, 85vw); max-width: 100%; max-height: 50vh; border-radius: inherit; display: block; outline: none; }
+.media-carousel { position: relative; width: min(220px, 85vw); max-width: 100%; border-radius: inherit; overflow: hidden; }
+.media-carousel img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; cursor: pointer; }
+.mc-arrow { position:absolute; top:50%; transform:translateY(-50%); width:34px; height:34px; border-radius:999px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.14); color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; }
+.mc-arrow:hover { background: rgba(0,0,0,0.6); }
+.mc-prev { left:8px; }
+.mc-next { right:8px; }
+.mc-count { position:absolute; right:8px; bottom:8px; font-size:11px; padding:3px 8px; border-radius:999px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.12); color:#fff; }
 .media-loading { width: min(220px, 85vw); max-width: 100%; aspect-ratio: 1; min-height: 120px; border-radius: inherit; background: linear-gradient(90deg, #2c2c2e 25%, #3a3a3c 50%, #2c2c2e 75%); background-size: 400% 100%; animation: shimmer 1.4s infinite; }
 @keyframes shimmer { 0%{background-position:100% 0} 100%{background-position:-100% 0} }
 .media-loading.failed { animation: none; background: #2c2c2e; display: flex; align-items: center; justify-content: center; color: #636366; font-size: 12px; cursor: pointer; }
@@ -1873,13 +1880,23 @@ function appendMessageToDOM(area, m, idx) {
   const bodyText = m.body || '';
   const urlRegex = /(https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp|mp4|mov)(\?[^\s]*)?)/gi;
   const mediaUrlFromCache = m.media_url || null;
+  const mediaUrlsFromCache = Array.isArray(m.media_urls) ? m.media_urls.filter(Boolean) : [];
   const isMediaUrl = mediaUrlFromCache || bodyText.trim().match(/^https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp|mp4|mov)(\?[^\s]*)?$/i);
   const mediaUrlToUse = mediaUrlFromCache || bodyText.trim();
   const isVid = (mediaUrlToUse||'').match(/\.(mp4|mov)(\?[^\s]*)?$/i);
   const hasTwilioMedia = !isMediaUrl && m.num_media && parseInt(m.num_media) > 0;
   const bubble = document.createElement('div');
 
-  if (hasTwilioMedia) {
+  if (mediaUrlsFromCache.length > 1) {
+    bubble.className = 'bubble media-bubble';
+    const car = buildImageCarousel(mediaUrlsFromCache, ts);
+    bubble.appendChild(car);
+    const cap = document.createElement('div');
+    cap.className = 'media-caption';
+    cap.textContent = ts;
+    bubble.appendChild(cap);
+    row.appendChild(bubble); area.appendChild(row);
+  } else if (hasTwilioMedia) {
     bubble.className = 'bubble media-bubble';
     bubble.innerHTML = `<div class="media-loading"></div><div class="media-caption">${ts}</div>`;
     row.appendChild(bubble); area.appendChild(row);
@@ -1898,6 +1915,27 @@ function appendMessageToDOM(area, m, idx) {
     const urlMatches = bodyText.match(urlRegex) || [];
     const textOnly = bodyText.replace(urlRegex,'').trim();
     let inner = '';
+    const imgUrls = urlMatches.filter(u => u && !u.match(/\.(mp4|mov)/i));
+    const vidUrls = urlMatches.filter(u => u && u.match(/\.(mp4|mov)/i));
+    if (imgUrls.length > 1 && !vidUrls.length) {
+      // Build carousel (dom) then stitch with text
+      bubble.className = 'bubble media-bubble';
+      const car = buildImageCarousel(imgUrls, ts);
+      bubble.appendChild(car);
+      if (textOnly) {
+        const t = document.createElement('div');
+        t.style.padding = '6px 10px 0';
+        t.style.fontSize = '14px';
+        t.textContent = textOnly;
+        bubble.appendChild(t);
+      }
+      const cap = document.createElement('div');
+      cap.className = 'media-caption';
+      cap.textContent = ts;
+      bubble.appendChild(cap);
+      row.appendChild(bubble); area.appendChild(row);
+      return;
+    }
     urlMatches.forEach(url => {
       if (url.match(/\.(mp4|mov)/i)) inner += `<video class="media-video" src="${url}" controls style="margin-bottom:4px;" onclick="event.stopPropagation()"></video>`;
       else { const esc=url.replace(/"/g,'&quot;'); inner += `<img class="media-img" src="${esc}" style="margin-bottom:4px;" onclick="openLightbox('${esc}',false,'')" onerror="this.style.display='none'" />`; }
@@ -2220,6 +2258,7 @@ async function runMassSend() {
       body: d.body || combinedBody,
       num_media: mediaUrls.length,
       media_url: mediaUrls[0] || null,
+      media_urls: mediaUrls,
       date_sent: d.date_created || new Date().toISOString(),
       date_created: d.date_created || new Date().toISOString()
     };
@@ -2270,7 +2309,7 @@ async function sendMsg() {
   document.getElementById('msg-input').value = '';
   document.getElementById('msg-input').style.height = 'auto';
   clearImgUrl();
-  const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || combinedBody, num_media: mediaUrls.length, media_url: mediaUrls[0] || null, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
+  const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || combinedBody, num_media: mediaUrls.length, media_url: mediaUrls[0] || null, media_urls: mediaUrls, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
   const area = document.getElementById('messages');
   appendMessageToDOM(area, optMsg, activeIdx);
   lastSids[activeIdx].add(d.sid);
@@ -2297,6 +2336,8 @@ async function loadTwilioMedia(msgSid, contactIdx, bubble, ts) {
     const data = await res.json();
     if (!data.media_list||!data.media_list.length) { const el=bubble.querySelector('.media-loading'); if(el){el.classList.add('failed');el.textContent='No media';} return; }
     const loadingDiv = bubble.querySelector('.media-loading');
+    const imageUrls = [];
+    let insertedVideo = false;
     for (const media of data.media_list) {
       const ct = media.content_type||'';
       try {
@@ -2307,13 +2348,21 @@ async function loadTwilioMedia(msgSid, contactIdx, bubble, ts) {
         if (ct.startsWith('video')) {
           const vid = document.createElement('video'); vid.className='media-video'; vid.src=objUrl; vid.controls=true; vid.onclick=e=>e.stopPropagation();
           if (loadingDiv) loadingDiv.replaceWith(vid); else bubble.insertBefore(vid,bubble.firstChild);
+          insertedVideo = true;
         } else {
-          const img = document.createElement('img'); img.className='media-img'; img.src=objUrl;
-          img.onclick=()=>openLightbox(objUrl,false,ts);
-          img.onerror=()=>{if(loadingDiv){loadingDiv.classList.add('failed');loadingDiv.textContent='📎 Tap to view';loadingDiv.style.cursor='pointer';loadingDiv.onclick=()=>window.open(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages/${msgSid}/Media/${media.sid}`);}};
-          if (loadingDiv) loadingDiv.replaceWith(img); else bubble.insertBefore(img,bubble.firstChild);
+          imageUrls.push(objUrl);
         }
       } catch(e2) { if(loadingDiv){loadingDiv.classList.add('failed');loadingDiv.textContent='📎 Tap to view';loadingDiv.style.cursor='pointer';loadingDiv.onclick=()=>window.open(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages/${msgSid}/Media/${media.sid}`);} }
+    }
+    if (!insertedVideo && imageUrls.length) {
+      const car = imageUrls.length > 1 ? buildImageCarousel(imageUrls, ts) : null;
+      if (car) {
+        if (loadingDiv) loadingDiv.replaceWith(car); else bubble.insertBefore(car, bubble.firstChild);
+      } else {
+        const img = document.createElement('img'); img.className='media-img'; img.src=imageUrls[0];
+        img.onclick=()=>openLightbox(imageUrls[0],false,ts);
+        if (loadingDiv) loadingDiv.replaceWith(img); else bubble.insertBefore(img,bubble.firstChild);
+      }
     }
   } catch(e) { const el=bubble.querySelector('.media-loading'); if(el){el.classList.add('failed');el.textContent='Failed';} }
 }
@@ -2358,6 +2407,51 @@ function clearImgUrl() {
 }
 
 // ── LIGHTBOX ──
+function buildImageCarousel(urls, ts) {
+  const wrap = document.createElement('div');
+  wrap.className = 'media-carousel';
+  wrap.dataset.idx = '0';
+  wrap.dataset.count = String(urls.length);
+
+  const img = document.createElement('img');
+  img.className = 'media-img';
+  img.style.width = '100%';
+  img.style.minHeight = '120px';
+  img.src = urls[0];
+  img.onclick = () => openLightbox(urls[parseInt(wrap.dataset.idx || '0', 10)] || urls[0], false, ts || '');
+  wrap.appendChild(img);
+
+  const prev = document.createElement('button');
+  prev.type = 'button';
+  prev.className = 'mc-arrow mc-prev';
+  prev.textContent = '‹';
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'mc-arrow mc-next';
+  next.textContent = '›';
+
+  const count = document.createElement('div');
+  count.className = 'mc-count';
+  count.textContent = `1/${urls.length}`;
+
+  function setIdx(newIdx) {
+    const n = urls.length;
+    const idx = ((newIdx % n) + n) % n;
+    wrap.dataset.idx = String(idx);
+    img.src = urls[idx];
+    count.textContent = `${idx + 1}/${n}`;
+  }
+  prev.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setIdx(parseInt(wrap.dataset.idx || '0', 10) - 1); });
+  next.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setIdx(parseInt(wrap.dataset.idx || '0', 10) + 1); });
+
+  if (urls.length > 1) {
+    wrap.appendChild(prev);
+    wrap.appendChild(next);
+    wrap.appendChild(count);
+  }
+  return wrap;
+}
+
 function openLightbox(src,isVideo,caption) {
   const img=document.getElementById('lightbox-img'), vid=document.getElementById('lightbox-video');
   if(isVideo){img.style.display='none';vid.style.display='block';vid.src=src;vid.play();}
