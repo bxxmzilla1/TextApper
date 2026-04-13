@@ -2223,10 +2223,9 @@ async function runMassSend() {
   const images = items.filter(x => x.kind === 'image').map(x => x.url).filter(Boolean);
   const videoLinks = items.filter(x => x.kind === 'video').map(x => x.url);
   const otherLinks = items.filter(x => x.kind === 'link').map(x => x.url);
-  const links = [...videoLinks, ...otherLinks];
-  const combinedBody = links.length ? (body ? (body + '\n' + links.join('\n')) : links.join('\n')) : body;
+  const combinedBody = otherLinks.length ? (body ? (body + '\n' + otherLinks.join('\n')) : otherLinks.join('\n')) : body;
   const mediaUrls = images.slice(0, 10);
-  if (!combinedBody && !mediaUrls.length) {
+  if (!combinedBody && !mediaUrls.length && !videoLinks.length) {
     showToast('Mass message', 'Add text or media.');
     return;
   }
@@ -2245,43 +2244,66 @@ async function runMassSend() {
   for (let i = 0; i < rec.length; i++) {
     const { idx, c } = rec[i];
     prog.textContent = 'Sending ' + (i + 1) + '/' + rec.length + '…';
-    const res = await twilioPostMessage(c.num, combinedBody, mediaUrls.length ? mediaUrls : undefined);
-    if (!res.ok) {
-      fail++;
-      continue;
-    }
-    ok++;
-    const d = res.d;
-    const optMsg = {
-      sid: d.sid,
-      direction: 'outbound-api',
-      body: d.body || combinedBody,
-      num_media: mediaUrls.length,
-      media_url: mediaUrls[0] || null,
-      media_urls: mediaUrls,
-      date_sent: d.date_created || new Date().toISOString(),
-      date_created: d.date_created || new Date().toISOString()
-    };
-    if (idx >= 0 && contacts[idx] && contacts[idx].num === c.num) {
-      if (!lastSids[idx]) lastSids[idx] = new Set();
-      lastSids[idx].add(d.sid);
-      if (!chatCache[c.num]) chatCache[c.num] = [];
-      chatCache[c.num].push(optMsg);
-      cacheSingleMessage(c.num, optMsg);
-      const hasLinks = links.length > 0;
-      const previewBit = hasLinks
-        ? (body ? body.slice(0, 40) : '[Links]')
-        : (mediaUrls.length ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
-      contacts[idx].lastMsg = 'You: ' + previewBit;
-      contacts[idx].lastTime = optMsg.date_sent;
-      saveContactToDB(contacts[idx]);
-      if (idx === activeIdx && document.getElementById('chat-view').style.display !== 'none') {
-        const area = document.getElementById('messages');
-        appendMessageToDOM(area, optMsg, idx);
-        area.scrollTop = area.scrollHeight;
+    // 1) Send base message (text + non-video links + images) once
+    if (combinedBody || mediaUrls.length) {
+      const res = await twilioPostMessage(c.num, combinedBody, mediaUrls.length ? mediaUrls : undefined);
+      if (!res.ok) { fail++; continue; }
+      ok++;
+      const d = res.d;
+      const optMsg = {
+        sid: d.sid,
+        direction: 'outbound-api',
+        body: d.body || combinedBody,
+        num_media: mediaUrls.length,
+        media_url: mediaUrls[0] || null,
+        media_urls: mediaUrls,
+        date_sent: d.date_created || new Date().toISOString(),
+        date_created: d.date_created || new Date().toISOString()
+      };
+      if (idx >= 0 && contacts[idx] && contacts[idx].num === c.num) {
+        if (!lastSids[idx]) lastSids[idx] = new Set();
+        lastSids[idx].add(d.sid);
+        if (!chatCache[c.num]) chatCache[c.num] = [];
+        chatCache[c.num].push(optMsg);
+        cacheSingleMessage(c.num, optMsg);
+        const previewBit = mediaUrls.length ? (body ? body.slice(0, 40) : '[Media]') : (combinedBody || '').slice(0, 40);
+        contacts[idx].lastMsg = 'You: ' + previewBit;
+        contacts[idx].lastTime = optMsg.date_sent;
+        saveContactToDB(contacts[idx]);
+        if (idx === activeIdx && document.getElementById('chat-view').style.display !== 'none') {
+          const area = document.getElementById('messages');
+          appendMessageToDOM(area, optMsg, idx);
+          area.scrollTop = area.scrollHeight;
+        }
       }
+      await new Promise(r => setTimeout(r, 120));
     }
-    await new Promise(r => setTimeout(r, 120));
+
+    // 2) Send each video URL as its own message
+    for (const vurl of videoLinks) {
+      prog.textContent = 'Sending ' + (i + 1) + '/' + rec.length + '… (videos)';
+      const r2 = await twilioPostMessage(c.num, vurl, undefined);
+      if (!r2.ok) { fail++; continue; }
+      ok++;
+      const d2 = r2.d;
+      const opt2 = { sid: d2.sid, direction: 'outbound-api', body: d2.body || vurl, num_media: 0, media_url: null, date_sent: d2.date_created || new Date().toISOString(), date_created: d2.date_created || new Date().toISOString() };
+      if (idx >= 0 && contacts[idx] && contacts[idx].num === c.num) {
+        if (!lastSids[idx]) lastSids[idx] = new Set();
+        lastSids[idx].add(d2.sid);
+        if (!chatCache[c.num]) chatCache[c.num] = [];
+        chatCache[c.num].push(opt2);
+        cacheSingleMessage(c.num, opt2);
+        contacts[idx].lastMsg = 'You: ' + '[Video link]';
+        contacts[idx].lastTime = opt2.date_sent;
+        saveContactToDB(contacts[idx]);
+        if (idx === activeIdx && document.getElementById('chat-view').style.display !== 'none') {
+          const area = document.getElementById('messages');
+          appendMessageToDOM(area, opt2, idx);
+          area.scrollTop = area.scrollHeight;
+        }
+      }
+      await new Promise(r => setTimeout(r, 120));
+    }
   }
   const summary = 'Done: ' + ok + ' sent' + (fail ? ', ' + fail + ' failed' : '') + '.';
   prog.textContent = summary;
@@ -2297,33 +2319,54 @@ async function sendMsg() {
   const images = items.filter(x => x.kind === 'image').map(x => x.url).filter(Boolean);
   const videoLinks = items.filter(x => x.kind === 'video').map(x => x.url);
   const otherLinks = items.filter(x => x.kind === 'link').map(x => x.url);
-  const links = [...videoLinks, ...otherLinks];
-  const combinedBody = links.length ? (body ? (body + '\n' + links.join('\n')) : links.join('\n')) : body;
+  const combinedBody = otherLinks.length ? (body ? (body + '\n' + otherLinks.join('\n')) : otherLinks.join('\n')) : body;
   const mediaUrls = images.slice(0, 10);
-  if (!combinedBody && !mediaUrls.length) return;
+  if (!combinedBody && !mediaUrls.length && !videoLinks.length) return;
   if (activeIdx < 0 || !currentModel) return;
   const c = contacts[activeIdx];
-  const res = await twilioPostMessage(c.num, combinedBody, mediaUrls.length ? mediaUrls : undefined);
-  if (!res.ok) return;
-  const d = res.d;
+  const area = document.getElementById('messages');
+
+  // 1) Send base message (text + non-video links + images) once
+  if (combinedBody || mediaUrls.length) {
+    const res = await twilioPostMessage(c.num, combinedBody, mediaUrls.length ? mediaUrls : undefined);
+    if (!res.ok) return;
+    const d = res.d;
+    const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || combinedBody, num_media: mediaUrls.length, media_url: mediaUrls[0] || null, media_urls: mediaUrls, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
+    appendMessageToDOM(area, optMsg, activeIdx);
+    lastSids[activeIdx].add(d.sid);
+    if (chatCache[c.num]) chatCache[c.num].push(optMsg);
+    cacheSingleMessage(c.num, optMsg);
+    const previewBit = mediaUrls.length ? (body ? body.slice(0, 40) : '[Media]') : (combinedBody || '').slice(0, 40);
+    contacts[activeIdx].lastMsg = 'You: ' + previewBit;
+    contacts[activeIdx].lastTime = optMsg.date_sent;
+    saveContactToDB(contacts[activeIdx]);
+    refreshSidebarList();
+    area.scrollTop = area.scrollHeight;
+    await new Promise(r => setTimeout(r, 120));
+  }
+
+  // 2) Send each video URL as its own message
+  for (const vurl of videoLinks) {
+    const r2 = await twilioPostMessage(c.num, vurl, undefined);
+    if (!r2.ok) return;
+    const d2 = r2.d;
+    const opt2 = { sid: d2.sid, direction: 'outbound-api', body: d2.body || vurl, num_media: 0, media_url: null, date_sent: d2.date_created || new Date().toISOString(), date_created: d2.date_created || new Date().toISOString() };
+    appendMessageToDOM(area, opt2, activeIdx);
+    lastSids[activeIdx].add(d2.sid);
+    if (chatCache[c.num]) chatCache[c.num].push(opt2);
+    cacheSingleMessage(c.num, opt2);
+    contacts[activeIdx].lastMsg = 'You: ' + '[Video link]';
+    contacts[activeIdx].lastTime = opt2.date_sent;
+    saveContactToDB(contacts[activeIdx]);
+    refreshSidebarList();
+    area.scrollTop = area.scrollHeight;
+    await new Promise(r => setTimeout(r, 120));
+  }
+
+  // Clear composer once after all sends
   document.getElementById('msg-input').value = '';
   document.getElementById('msg-input').style.height = 'auto';
   clearImgUrl();
-  const optMsg = { sid: d.sid, direction: 'outbound-api', body: d.body || combinedBody, num_media: mediaUrls.length, media_url: mediaUrls[0] || null, media_urls: mediaUrls, date_sent: d.date_created || new Date().toISOString(), date_created: d.date_created || new Date().toISOString() };
-  const area = document.getElementById('messages');
-  appendMessageToDOM(area, optMsg, activeIdx);
-  lastSids[activeIdx].add(d.sid);
-  if (chatCache[c.num]) chatCache[c.num].push(optMsg);
-  cacheSingleMessage(c.num, optMsg);
-  const hasLinks = links.length > 0;
-  const previewBit = hasLinks
-    ? (body ? body.slice(0, 40) : '[Links]')
-    : (mediaUrls.length ? (body ? body.slice(0, 40) : '[Media]') : (body || '').slice(0, 40));
-  contacts[activeIdx].lastMsg = 'You: ' + previewBit;
-  contacts[activeIdx].lastTime = optMsg.date_sent;
-  saveContactToDB(contacts[activeIdx]);
-  refreshSidebarList();
-  area.scrollTop = area.scrollHeight;
 }
 
 // ── TWILIO MEDIA ──
