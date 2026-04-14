@@ -1003,7 +1003,6 @@ let pendingModelAvatarFile = null;
 let pendingModelAvatarObjectUrl = null;
 let inboundCheckInterval = null;
 let inboundCheckLock = false;
-let inboundKnownSids = new Set();
 let isFetching = {};
 const COLORS = ['#e74c8b','#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#a855f7'];
 function colorFor(i) { return COLORS[i % COLORS.length]; }
@@ -2625,71 +2624,31 @@ async function checkForNewSenders() {
     const res = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages.json?To=${encodeURIComponent(fromNum)}&PageSize=50`),{headers});
     const data = await res.json();
     if (!data.messages) return;
-    let anyUpdate = false;
     for (const msg of data.messages) {
       const senderNum = msg.from;
       const sk = phoneKey(senderNum);
       if (!senderNum) continue;
+      if (contacts.some(c => phoneKey(c.num) === sk || c.num === senderNum)) continue;
       if (dismissedPhoneKeys.has(sk)) continue;
-
-      // De-dupe by Twilio SID so we can safely run every second.
-      const msgSid = msg.sid;
-      if (msgSid && inboundKnownSids.has(msgSid)) continue;
-      if (msgSid) inboundKnownSids.add(msgSid);
-
-      const when = msg.date_sent || msg.date_created || new Date().toISOString();
-      const bodyText = msg.body || '';
-
-      // Ensure exactly one chat per phone
-      let idx = findContactIndexByPhone(senderNum);
-      if (idx < 0) {
-        const newC = {name:'', num:senderNum, lastMsg:bodyText, lastTime:when, archived: false};
+      const newC = {name:'', num:senderNum, lastMsg:msg.body||'', lastTime:msg.date_sent||msg.date_created, archived: false};
+      // If we already have this number in memory (different formatting), update instead of duplicating.
+      const existingIdx = findContactIndexByPhone(senderNum);
+      if (existingIdx >= 0) {
+        const ex = contacts[existingIdx];
+        ex.num = preferCanonicalPhone(ex.num, senderNum);
+        ex.lastMsg = newC.lastMsg || ex.lastMsg;
+        ex.lastTime = newC.lastTime || ex.lastTime;
+        await saveContactToDB(ex);
+      } else {
         const dbId = await saveContactToDB(newC);
         newC.id = dbId;
         contacts.push(newC);
-        idx = contacts.length - 1;
-        lastSids[idx] = new Set();
-        showToast(`💬 New message from ${senderNum}`, bodyText.slice(0,50));
-        anyUpdate = true;
-      } else {
-        const ex = contacts[idx];
-        ex.num = preferCanonicalPhone(ex.num, senderNum);
-        ex.lastMsg = bodyText || ex.lastMsg;
-        ex.lastTime = when || ex.lastTime;
-        patchContactLastActivity(ex);
-        anyUpdate = true;
+        const i = contacts.length-1;
+        lastSids[i] = new Set();
       }
-
-      // Update in-memory cache for that chat (so sidebar + open chat refresh without clicking)
-      const c = contacts[idx];
-      if (!chatCache[c.num]) chatCache[c.num] = [];
-      const opt = {
-        sid: msgSid || ('in_' + Date.now() + '_' + Math.random().toString(36).slice(2)),
-        direction: msg.direction || 'inbound',
-        body: bodyText,
-        num_media: parseInt(msg.num_media || 0, 10) || 0,
-        media_url: null,
-        date_sent: when,
-        date_created: when
-      };
-      const knownSet = lastSids[idx] || new Set();
-      if (!knownSet.has(opt.sid)) {
-        knownSet.add(opt.sid);
-        lastSids[idx] = knownSet;
-        chatCache[c.num].push(opt);
-        cacheSingleMessage(c.num, opt);
-      }
-
-      if (activeIdx === idx) {
-        const area = document.getElementById('messages');
-        if (area && !area.querySelector(`[data-sid="${opt.sid}"]`)) {
-          appendMessageToDOM(area, opt, idx);
-          area.scrollTop = area.scrollHeight;
-        }
-      }
+      refreshSidebarList();
+      showToast(`💬 New message from ${senderNum}`, (msg.body||'').slice(0,50));
     }
-    if (inboundKnownSids.size > 6000) inboundKnownSids = new Set(Array.from(inboundKnownSids).slice(-3000));
-    if (anyUpdate) refreshSidebarList();
   } catch(e) {} finally { inboundCheckLock = false; }
 }
 function startInboundChecker() {
