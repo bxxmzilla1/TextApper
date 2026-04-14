@@ -874,7 +874,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 const SUPABASE_URL = 'https://khjoizstnjovgkjykgvu.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtoam9penN0bmpvdmdranlrZ3Z1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4Njg3NDcsImV4cCI6MjA5MTQ0NDc0N30.cKC-cFEx2UtkOsQTwnh_cD0DNUBKObO-sicwp933RU8';
 const BUCKET = 'media';
+/** Custom domain for shorter media links (avatars, vault, composer). Uploads still use SUPABASE_URL; stored/sent URLs use this origin when set.
+ * Steps: (1) Deploy workers/supabase-media-proxy.js on Cloudflare and assign your subdomain (e.g. media.tips.fan). (2) Set the line below to that https origin, no trailing slash. (3) Or use any reverse proxy to the same Supabase paths. Leave '' to keep default long URLs.
+ */
+const MEDIA_PUBLIC_BASE = '';
 const PROXY = 'https://royal-term-bcac.bxxmzilla.workers.dev/';
+
+function publicMediaUrl(filename) {
+  const key = String(filename || '').replace(/^\/+/, '');
+  const base = (MEDIA_PUBLIC_BASE && String(MEDIA_PUBLIC_BASE).trim()) ? String(MEDIA_PUBLIC_BASE).trim().replace(/\/$/, '') : SUPABASE_URL;
+  return base + '/storage/v1/object/public/' + BUCKET + '/' + key;
+}
 
 // Supabase JS client — handles session persistence internally (no localStorage needed)
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -1226,7 +1236,7 @@ async function uploadAndPersistModelAvatar(modelId, file, prevStoragePath) {
     showToast('Model', 'Upload failed: ' + (e.message || 'unknown'));
     return false;
   }
-  const publicUrl = SUPABASE_URL + '/storage/v1/object/public/' + BUCKET + '/' + filename;
+  const publicUrl = publicMediaUrl(filename);
   const r = await sbPatch('/rest/v1/models?id=eq.' + encodeURIComponent(modelId), {
     avatar_url: publicUrl,
     avatar_storage_path: filename
@@ -1409,7 +1419,7 @@ async function selectModel(m) {
   document.getElementById('sw-name').textContent = m.name;
   await initChat();
 }
-function goToModels() {
+async function goToModels() {
   stopAllPollers();
   contacts = []; contactGroups = []; activeIdx = -1; lastSids = {}; chatCache = {}; dismissedPhoneKeys = new Set();
   sidebarTab = 'chats'; expandedGroupId = null; editingGroupId = null;
@@ -1426,6 +1436,10 @@ function goToModels() {
   updateGroupBackBar();
   const fb = document.getElementById('sidebar-footer-btn');
   if (fb) { fb.textContent = '＋ New conversation'; fb.disabled = false; }
+  await loadModels();
+  renderModels();
+  const ub = document.getElementById('user-email-badge');
+  if (ub) ub.textContent = currentUser?.user?.email || '';
   document.getElementById('models-screen').classList.remove('hidden');
 }
 async function showModelsScreen() {
@@ -3130,7 +3144,7 @@ async function uploadMassMsgFile(input) {
         xhr.onerror = () => rej(new Error('Network error'));
         xhr.send(file);
       });
-      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
+      const publicUrl = publicMediaUrl(filename);
       registerVaultMedia(publicUrl, kind, file.name, filename);
       addPendingMediaItem('mass', publicUrl, kind);
       document.getElementById('mass-msg-img-url').value = publicUrl;
@@ -3357,7 +3371,7 @@ async function uploadFile(input) {
       xhr.upload.onprogress = e => { if(e.lengthComputable) barEl.style.width=Math.round(e.loaded/e.total*90)+'%'; };
       await new Promise((res,rej)=>{ xhr.onload=()=>xhr.status<300?res():rej(new Error('Upload failed: '+xhr.status)); xhr.onerror=()=>rej(new Error('Network error')); xhr.send(file); });
       barEl.style.width='100%';
-      const publicUrl=`${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filename}`;
+      const publicUrl = publicMediaUrl(filename);
       registerVaultMedia(publicUrl, kind, file.name, filename);
       addPendingMediaItem('composer', publicUrl, kind);
       document.getElementById('img-url').value='';
@@ -3484,6 +3498,7 @@ document.getElementById('img-url')?.addEventListener('keydown', (e) => {
   if (session?.access_token) {
     currentUser = session;
     await loadModels();
+    renderModels();
     const lastModelId = session.user?.user_metadata?.last_model_id;
     if (lastModelId) {
       const lastModel = models.find(m => m.id === lastModelId);
