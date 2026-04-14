@@ -3321,7 +3321,10 @@ async function runMassSend() {
 }
 
 async function sendMsg() {
-  const body = document.getElementById('msg-input').value.trim();
+  const inputEl = document.getElementById('msg-input');
+  const btn = document.getElementById('btn-send');
+  const rawBody = (inputEl?.value || '');
+  const body = rawBody.trim();
   const items = (pendingMediaItems || []);
   const images = items.filter(x => x.kind === 'image').map(x => x.url).filter(Boolean);
   const videoLinks = items.filter(x => x.kind === 'video').map(x => x.url);
@@ -3333,6 +3336,14 @@ async function sendMsg() {
   const c = contacts[activeIdx];
   const area = document.getElementById('messages');
 
+  // Optimistic UX: clear input immediately, lock send button during network.
+  if (btn) btn.disabled = true;
+  if (btn) btn.style.opacity = '0.6';
+  if (inputEl) { inputEl.value = ''; inputEl.style.height = 'auto'; }
+  const prevPending = (pendingMediaItems || []).slice();
+  clearImgUrl();
+
+  try {
   // 1) Send base message (text + non-video links + images) once
   if (combinedBody || mediaUrls.length) {
     const res = await twilioPostMessage(c.num, combinedBody, mediaUrls.length ? mediaUrls : undefined);
@@ -3369,11 +3380,16 @@ async function sendMsg() {
     area.scrollTop = area.scrollHeight;
     await new Promise(r => setTimeout(r, 120));
   }
-
-  // Clear composer once after all sends
-  document.getElementById('msg-input').value = '';
-  document.getElementById('msg-input').style.height = 'auto';
-  clearImgUrl();
+  } catch (e) {
+    // If something throws unexpectedly, restore the user's draft so it isn't lost.
+    if (inputEl && !inputEl.value) inputEl.value = rawBody;
+    pendingMediaItems = prevPending;
+    renderPendingMediaPreview('composer-preview', 'composer');
+    showToast('Send failed', 'Please try again.');
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btn) btn.style.opacity = '';
+  }
 }
 
 // ── TWILIO MEDIA ──
