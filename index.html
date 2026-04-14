@@ -2217,27 +2217,14 @@ async function initChat() {
   await loadContactsFromDB();
   await loadContactGroupsFromDB();
   contacts.forEach((_, i) => { lastSids[i] = new Set(); });
-  await preloadAllChats();
-  // Populate lastSids from cache so poller never treats cached msgs as new
-  contacts.forEach((c, i) => {
-    const msgs = chatCache[c.num] || [];
-    lastSids[i] = new Set(msgs.map(m => m.sid));
-  });
   hideLoading();
   refreshSidebarList();
-  startAllPollers();
+  // Lazy-load messages per chat (fast startup). We'll poll only the open chat.
   startInboundChecker();
   syncMobileChatPanel();
 }
-async function preloadAllChats() {
-  for (let i = 0; i < contacts.length; i++) {
-    const c = contacts[i];
-    setLoading(`Loading ${c.name || c.num} (${i+1}/${contacts.length})…`);
-    const cached = await loadCachedMessages(c.num);
-    chatCache[c.num] = cached;
-    fetchAndCacheContact(i);
-  }
-}
+// NOTE: We intentionally do NOT preload every chat on startup.
+// Messages are loaded on-demand in openChat(), which keeps load time fast even with hundreds of threads.
 
 // ── Sidebar: highlight until you send the next message (their text was last) ──
 function isOutboundDirection(dir) {
@@ -2394,6 +2381,7 @@ function backToChatList() {
   showMainEmpty();
   syncMobileChatPanel();
   refreshSidebarList();
+  stopAllPollers();
 }
 
 // ── OPEN CHAT ──
@@ -2406,13 +2394,22 @@ async function openChat(idx) {
   const area = document.getElementById('messages');
   if (activeIdx >= 0 && activeIdx !== idx) scrollPositions[activeIdx] = area.scrollTop;
   activeIdx = idx;
-  const allMsgs = chatCache[c.num] || [];
+  if (!chatCache[c.num]) chatCache[c.num] = [];
 
   showMainChat();
   updateChatHeaderUI(idx);
-  area.innerHTML = '';
-  lastSids[idx] = new Set();
-  renderMessages(idx, allMsgs);
+  area.innerHTML = '<p class="no-msgs">Loading…</p>';
+
+  // Load cached messages on-demand (fast), then refresh from Twilio in background.
+  if (!chatCache[c.num].length) {
+    const cached = await loadCachedMessages(c.num);
+    chatCache[c.num] = cached;
+  }
+
+  lastSids[idx] = new Set((chatCache[c.num] || []).map(m => m.sid));
+  renderMessages(idx, chatCache[c.num] || []);
+  startAllPollers();
+  fetchAndCacheContact(idx);
   if (scrollPositions[idx] !== undefined) area.scrollTop = scrollPositions[idx];
   else area.scrollTop = area.scrollHeight;
   syncMobileChatPanel();
@@ -2564,7 +2561,12 @@ async function fetchAndCacheContact(idx) {
 }
 
 function startPoller(idx) { if (intervals[idx]) clearInterval(intervals[idx]); intervals[idx] = setInterval(() => fetchAndCacheContact(idx), 1000); }
-function startAllPollers() { stopAllPollers(); contacts.forEach((_,i) => startPoller(i)); }
+function startAllPollers() {
+  // Previously polled every contact every second (doesn't scale).
+  // We now only poll the currently open chat.
+  stopAllPollers();
+  if (activeIdx >= 0) startPoller(activeIdx);
+}
 function stopAllPollers() { Object.values(intervals).forEach(clearInterval); intervals = {}; if (inboundCheckInterval) { clearInterval(inboundCheckInterval); inboundCheckInterval = null; } }
 
 // ── INBOUND CHECKER ──
@@ -2588,7 +2590,7 @@ async function checkForNewSenders() {
       contacts.push(newC);
       const i = contacts.length-1;
       lastSids[i] = new Set();
-      startPoller(i); refreshSidebarList();
+      refreshSidebarList();
       showToast(`💬 New message from ${senderNum}`, (msg.body||'').slice(0,50));
     }
   } catch(e) {}
