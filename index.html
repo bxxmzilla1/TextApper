@@ -2281,9 +2281,11 @@ function contactAwaitingOurReply(c) {
     const last = msgs[msgs.length - 1];
     return !isOutboundDirection(last.direction);
   }
-  const preview = (c.lastMsg || '').trim();
+  const preview = String(c.lastMsg || '').trim();
   if (!preview || preview === 'No messages yet') return false;
-  return !preview.startsWith('You: ');
+  // When chatCache isn't loaded yet (lazy), we fall back to the saved preview line.
+  // Be tolerant to casing/whitespace so refresh doesn't falsely flag threads.
+  return !/^\s*you:\s/i.test(preview);
 }
 
 // ── SIDEBAR: chats vs groups vs archive ──
