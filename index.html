@@ -1456,6 +1456,48 @@ async function showModelsScreen() {
 function phoneKey(n) {
   return String(n || '').replace(/\D/g, '');
 }
+function preferCanonicalPhone(existingNum, candidateNum) {
+  const a = String(existingNum || '').trim();
+  const b = String(candidateNum || '').trim();
+  if (!a) return b;
+  if (!b) return a;
+  // Prefer E.164-style (+...) if available.
+  if (a.startsWith('+') && !b.startsWith('+')) return a;
+  if (b.startsWith('+') && !a.startsWith('+')) return b;
+  // Otherwise keep the longer (often includes +country).
+  return b.length > a.length ? b : a;
+}
+function dedupeContactsByPhone(list) {
+  const byPk = new Map();
+  (Array.isArray(list) ? list : []).forEach(c => {
+    const pk = phoneKey(c?.num);
+    if (!pk) return;
+    const prev = byPk.get(pk);
+    if (!prev) {
+      byPk.set(pk, { ...c, num: String(c.num || '').trim() });
+      return;
+    }
+    // Merge: keep best fields.
+    const prevTime = prev.lastTime ? new Date(prev.lastTime).getTime() : -Infinity;
+    const curTime = c.lastTime ? new Date(c.lastTime).getTime() : -Infinity;
+    const useCurPreview = curTime > prevTime;
+    byPk.set(pk, {
+      ...prev,
+      id: prev.id || c.id,
+      num: preferCanonicalPhone(prev.num, c.num),
+      name: (prev.name && prev.name.trim()) ? prev.name : (c.name || ''),
+      archived: !!(prev.archived || c.archived),
+      lastTime: useCurPreview ? (c.lastTime || prev.lastTime) : prev.lastTime,
+      lastMsg: useCurPreview ? (c.lastMsg || prev.lastMsg) : prev.lastMsg
+    });
+  });
+  return [...byPk.values()];
+}
+function findContactIndexByPhone(num) {
+  const pk = phoneKey(num);
+  if (!pk) return -1;
+  return contacts.findIndex(c => phoneKey(c.num) === pk);
+}
 async function loadDismissedPhoneKeysFromDB() {
   dismissedPhoneKeys = new Set();
   if (!currentModel || !getUserId()) return;
@@ -1498,8 +1540,9 @@ async function removeDismissedPhoneKey(num) {
 async function loadContactsFromDB() {
   const userId = getUserId();
   const data = await sbGet('/rest/v1/contacts', { select: '*', model_id: 'eq.' + currentModel.id, user_id: 'eq.' + userId, order: 'created_at.asc' });
-  contacts = Array.isArray(data) ? data.map(r => ({ id: r.id, name: r.name||'', num: r.num, lastMsg: r.last_msg||'', lastTime: r.last_time||null, archived: !!r.archived })) : [];
-  contacts = contacts.filter(c => !dismissedPhoneKeys.has(phoneKey(c.num)));
+  const raw = Array.isArray(data) ? data.map(r => ({ id: r.id, name: r.name||'', num: r.num, lastMsg: r.last_msg||'', lastTime: r.last_time||null, archived: !!r.archived })) : [];
+  const filtered = raw.filter(c => !dismissedPhoneKeys.has(phoneKey(c.num)));
+  contacts = dedupeContactsByPhone(filtered);
 }
 async function saveContactToDB(c) {
   const userId = getUserId();
@@ -2585,11 +2628,21 @@ async function checkForNewSenders() {
       if (contacts.some(c => phoneKey(c.num) === sk || c.num === senderNum)) continue;
       if (dismissedPhoneKeys.has(sk)) continue;
       const newC = {name:'', num:senderNum, lastMsg:msg.body||'', lastTime:msg.date_sent||msg.date_created, archived: false};
-      const dbId = await saveContactToDB(newC);
-      newC.id = dbId;
-      contacts.push(newC);
-      const i = contacts.length-1;
-      lastSids[i] = new Set();
+      // If we already have this number in memory (different formatting), update instead of duplicating.
+      const existingIdx = findContactIndexByPhone(senderNum);
+      if (existingIdx >= 0) {
+        const ex = contacts[existingIdx];
+        ex.num = preferCanonicalPhone(ex.num, senderNum);
+        ex.lastMsg = newC.lastMsg || ex.lastMsg;
+        ex.lastTime = newC.lastTime || ex.lastTime;
+        await saveContactToDB(ex);
+      } else {
+        const dbId = await saveContactToDB(newC);
+        newC.id = dbId;
+        contacts.push(newC);
+        const i = contacts.length-1;
+        lastSids[i] = new Set();
+      }
       refreshSidebarList();
       showToast(`💬 New message from ${senderNum}`, (msg.body||'').slice(0,50));
     }
@@ -2606,12 +2659,22 @@ async function addContact() {
   if (!num) return;
   await removeDismissedPhoneKey(num);
   const newC = {name, num, lastMsg:'', lastTime:null, archived: false};
+  const existingIdx = findContactIndexByPhone(num);
+  if (existingIdx >= 0) {
+    // Update existing contact instead of creating a duplicate row.
+    const ex = contacts[existingIdx];
+    ex.num = preferCanonicalPhone(ex.num, num);
+    if (name && name.trim()) ex.name = name.trim();
+    await saveContactToDB(ex);
+    closeAddContactModal(); refreshSidebarList(); openChat(existingIdx);
+    return;
+  }
   const dbId = await saveContactToDB(newC);
   newC.id = dbId;
   contacts.push(newC);
   const i = contacts.length-1;
   lastSids[i] = new Set();
-  closeAddContactModal(); refreshSidebarList(); startPoller(i); openChat(i);
+  closeAddContactModal(); refreshSidebarList(); openChat(i);
 }
 
 async function archiveCurrentChat() {
