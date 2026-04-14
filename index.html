@@ -1091,6 +1091,16 @@ function formatDate(d) {
   if (md.getTime() === yest.getTime()) return 'Yesterday';
   return d.toLocaleDateString([], {month:'long', day:'numeric'});
 }
+function formatChatListTimestamp(isoOrDate) {
+  if (!isoOrDate) return '';
+  const d = (isoOrDate instanceof Date) ? isoOrDate : new Date(isoOrDate);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const md = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  if (md.getTime() === today.getTime()) return formatTime(d);
+  return `${formatDate(d)} · ${formatTime(d)}`;
+}
 
 // ── AUTH ──
 let authMode = 'signin';
@@ -2312,7 +2322,7 @@ function renderGroupMembersList() {
     const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
     if (q && !hay.includes(q)) return;
     shown++;
-    const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
+    const time = formatChatListTimestamp(c.lastTime);
     const previewEsc = (c.lastMsg || 'No messages yet').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const titleEsc = escapeHtml(contactDisplayName(c));
     const phoneRow = contactHasNickname(c) ? `<div class="chat-item-phone">${escapeHtml(c.num)}</div>` : '';
@@ -2359,7 +2369,7 @@ function renderChatList() {
     if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
     const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
     if (q && !hay.includes(q)) return;
-    const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
+    const time = formatChatListTimestamp(c.lastTime);
     const previewEsc = (c.lastMsg || 'No messages yet').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const titleEsc = escapeHtml(contactDisplayName(c));
     const phoneRow = contactHasNickname(c) ? `<div class="chat-item-phone">${escapeHtml(c.num)}</div>` : '';
@@ -2399,7 +2409,7 @@ function renderArchivedChatList() {
     const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
     if (q && !hay.includes(q)) return;
     shown++;
-    const time = c.lastTime ? formatTime(new Date(c.lastTime)) : '';
+    const time = formatChatListTimestamp(c.lastTime);
     const previewEsc = (c.lastMsg || 'No messages yet').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const titleEsc = escapeHtml(contactDisplayName(c));
     const phoneRow = contactHasNickname(c) ? `<div class="chat-item-phone">${escapeHtml(c.num)}</div>` : '';
