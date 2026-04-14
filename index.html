@@ -2341,11 +2341,20 @@ function renderGroupMembersList() {
 }
 
 // ── RENDER CHAT LIST ──
+function contactSortTime(c) {
+  if (!c) return 0;
+  const t = c.lastTime ? new Date(c.lastTime).getTime() : 0;
+  return Number.isFinite(t) ? t : 0;
+}
 function renderChatList() {
   const q = (document.getElementById('search-input').value||'').toLowerCase();
   const list = document.getElementById('chat-list');
   list.innerHTML = '';
-  contacts.forEach((c, i) => {
+  const sorted = contacts.map((c, i) => ({ c, i }))
+    .filter(x => x.c && !x.c.archived && !dismissedPhoneKeys.has(phoneKey(x.c.num)))
+    .sort((a, b) => contactSortTime(b.c) - contactSortTime(a.c));
+
+  sorted.forEach(({ c, i }) => {
     if (c.archived) return;
     if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
     const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
@@ -2380,7 +2389,11 @@ function renderArchivedChatList() {
   const list = document.getElementById('chat-list');
   list.innerHTML = '';
   let shown = 0;
-  contacts.forEach((c, i) => {
+  const sorted = contacts.map((c, i) => ({ c, i }))
+    .filter(x => x.c && x.c.archived && !dismissedPhoneKeys.has(phoneKey(x.c.num)))
+    .sort((a, b) => contactSortTime(b.c) - contactSortTime(a.c));
+
+  sorted.forEach(({ c, i }) => {
     if (!c.archived) return;
     if (dismissedPhoneKeys.has(phoneKey(c.num))) return;
     const hay = ((c.name || '') + ' ' + c.num + ' ' + contactDisplayName(c)).toLowerCase();
