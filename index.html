@@ -2623,34 +2623,50 @@ async function checkForNewSenders() {
   const sid = currentModel.twilio_sid, auth = currentModel.twilio_auth, fromNum = currentModel.twilio_number;
   try {
     const headers = {'Authorization': 'Basic ' + btoa(sid+':'+auth)};
-    const res = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages.json?To=${encodeURIComponent(fromNum)}&PageSize=50`),{headers});
+    // Pull most recent messages across the account so previews/highlights stay correct
+    // even if you replied outside the app (Twilio direction will be outbound-*).
+    const res = await fetch(proxyUrl(`/2010-04-01/Accounts/${sid}/Messages.json?PageSize=50`),{headers});
     const data = await res.json();
     if (!data.messages) return;
     for (const msg of data.messages) {
-      const senderNum = msg.from;
-      const sk = phoneKey(senderNum);
-      if (!senderNum) continue;
-      if (contacts.some(c => phoneKey(c.num) === sk || c.num === senderNum)) continue;
-      if (dismissedPhoneKeys.has(sk)) continue;
-      const newC = {name:'', num:senderNum, lastMsg:msg.body||'', lastTime:msg.date_sent||msg.date_created, archived: false};
-      // If we already have this number in memory (different formatting), update instead of duplicating.
-      const existingIdx = findContactIndexByPhone(senderNum);
-      if (existingIdx >= 0) {
-        const ex = contacts[existingIdx];
-        ex.num = preferCanonicalPhone(ex.num, senderNum);
-        ex.lastMsg = newC.lastMsg || ex.lastMsg;
-        ex.lastTime = newC.lastTime || ex.lastTime;
-        await saveContactToDB(ex);
-      } else {
+      const from = msg.from;
+      const to = msg.to;
+      const otherNum = (phoneKey(from) === phoneKey(fromNum)) ? to : from;
+      const otherKey = phoneKey(otherNum);
+      if (!otherNum || !otherKey) continue;
+      if (dismissedPhoneKeys.has(otherKey)) continue;
+
+      const when = msg.date_sent || msg.date_created || new Date().toISOString();
+      const dir = String(msg.direction || '');
+      const isOut = dir.startsWith('outbound');
+      const bodyText = String(msg.body || '');
+      const previewText = (isOut ? 'You: ' : '') + bodyText.slice(0, 40);
+
+      let idx = findContactIndexByPhone(otherNum);
+      if (idx < 0) {
+        // Only auto-create for inbound messages (avoids creating random outbound-to numbers in rare cases)
+        if (isOut) continue;
+        const newC = {name:'', num:otherNum, lastMsg:previewText || bodyText, lastTime:when, archived: false};
         const dbId = await saveContactToDB(newC);
         newC.id = dbId;
         contacts.push(newC);
-        const i = contacts.length-1;
-        lastSids[i] = new Set();
+        idx = contacts.length - 1;
+        lastSids[idx] = new Set();
+        showToast(`💬 New message from ${otherNum}`, bodyText.slice(0,50));
+      } else {
+        const ex = contacts[idx];
+        // Only update preview if this message is newer than what we have.
+        const prevT = ex.lastTime ? new Date(ex.lastTime).getTime() : -Infinity;
+        const curT = when ? new Date(when).getTime() : -Infinity;
+        if (curT >= prevT) {
+          ex.num = preferCanonicalPhone(ex.num, otherNum);
+          ex.lastMsg = previewText || ex.lastMsg;
+          ex.lastTime = when || ex.lastTime;
+          patchContactLastActivity(ex);
+        }
       }
-      refreshSidebarList();
-      showToast(`💬 New message from ${senderNum}`, (msg.body||'').slice(0,50));
     }
+    refreshSidebarList();
   } catch(e) {} finally { inboundCheckLock = false; }
 }
 function startInboundChecker() {
