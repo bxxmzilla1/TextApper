@@ -1002,6 +1002,7 @@ let editingModelId = null;
 let pendingModelAvatarFile = null;
 let pendingModelAvatarObjectUrl = null;
 let inboundCheckInterval = null;
+let inboundCheckLock = false;
 let isFetching = {};
 const COLORS = ['#e74c8b','#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#a855f7'];
 function colorFor(i) { return COLORS[i % COLORS.length]; }
@@ -2615,6 +2616,8 @@ function stopAllPollers() { Object.values(intervals).forEach(clearInterval); int
 // ── INBOUND CHECKER ──
 async function checkForNewSenders() {
   if (!currentModel) return;
+  if (inboundCheckLock) return;
+  inboundCheckLock = true;
   const sid = currentModel.twilio_sid, auth = currentModel.twilio_auth, fromNum = currentModel.twilio_number;
   try {
     const headers = {'Authorization': 'Basic ' + btoa(sid+':'+auth)};
@@ -2646,9 +2649,13 @@ async function checkForNewSenders() {
       refreshSidebarList();
       showToast(`💬 New message from ${senderNum}`, (msg.body||'').slice(0,50));
     }
-  } catch(e) {}
+  } catch(e) {} finally { inboundCheckLock = false; }
 }
-function startInboundChecker() { if (inboundCheckInterval) clearInterval(inboundCheckInterval); checkForNewSenders(); inboundCheckInterval = setInterval(checkForNewSenders, 5000); }
+function startInboundChecker() {
+  if (inboundCheckInterval) clearInterval(inboundCheckInterval);
+  checkForNewSenders();
+  inboundCheckInterval = setInterval(checkForNewSenders, 1000);
+}
 
 // ── CONTACTS ──
 function openAddContactModal() { document.getElementById('contact-modal').style.display = 'flex'; }
