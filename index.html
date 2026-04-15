@@ -668,6 +668,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
             <input type="date" id="ins-birthday"/>
             <div class="ins-age-line" id="ins-age-display"></div>
           </div>
+          <div class="field"><label>Area code</label>
+            <div id="ins-area-code" style="color:#8e8e93;font-size:12px;">—</div>
+          </div>
           <div class="field"><label>Location</label>
             <div class="loc-suggest-wrap">
               <input type="text" id="ins-location" placeholder="Search city or place…" autocomplete="off"/>
@@ -1090,6 +1093,38 @@ function formatDate(d) {
   if (md.getTime() === today.getTime()) return 'Today';
   if (md.getTime() === yest.getTime()) return 'Yesterday';
   return d.toLocaleDateString([], {month:'long', day:'numeric'});
+}
+const NANP_AREA_CODE_LOCATIONS = {
+  // Best-effort: extend as needed.
+  '212': 'New York, USA',
+  '213': 'Los Angeles, USA',
+  '305': 'Miami, USA',
+  '312': 'Chicago, USA',
+  '404': 'Atlanta, USA',
+  '415': 'San Francisco, USA',
+  '702': 'Las Vegas, USA',
+  '713': 'Houston, USA',
+  '786': 'Miami, USA',
+  '818': 'Los Angeles, USA',
+  '917': 'New York, USA'
+};
+function areaCodeLabelForNumber(num) {
+  const raw = String(num || '').trim();
+  const d = raw.replace(/\D/g, '');
+  // NANP: +1 NXX...
+  if ((raw.startsWith('+1') || d.length === 11 && d.startsWith('1') || d.length === 10) ) {
+    const ten = d.length === 10 ? d : (d.length === 11 && d.startsWith('1') ? d.slice(1) : '');
+    const ac = ten ? ten.slice(0, 3) : '';
+    if (!ac) return 'USA/Canada';
+    const loc = NANP_AREA_CODE_LOCATIONS[ac];
+    return loc ? `+1 ${ac} — ${loc}` : `+1 ${ac} — USA/Canada`;
+  }
+  // Generic fallback
+  if (raw.startsWith('+')) {
+    const cc = d.slice(0, 3); // approximate; avoids false precision
+    return cc ? `+${cc} — (country code)` : '—';
+  }
+  return '—';
 }
 function formatChatListTimestamp(isoOrDate) {
   if (!isoOrDate) return '';
@@ -1834,6 +1869,8 @@ async function populateInsightsPanel(idx) {
   const c = contacts[idx];
   if (!c?.id) return;
   document.getElementById('ins-nickname').value = c.name || '';
+  const acEl = document.getElementById('ins-area-code');
+  if (acEl) acEl.textContent = areaCodeLabelForNumber(c.num);
   const row = await fetchContactInsightsRow(c.id);
   document.getElementById('ins-birthday').value = row?.birthday || '';
   document.getElementById('ins-location').value = row?.location_label || '';
