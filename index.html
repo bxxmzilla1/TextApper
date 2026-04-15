@@ -1109,7 +1109,26 @@ const NANP_AREA_CODE_LOCATIONS = {
   '818': 'Los Angeles, USA',
   '917': 'New York, USA'
 };
-function areaCodeLabelForNumber(num) {
+let nanpAreaCodeCache = null; // Map<string, {region, description}>
+async function loadNanpAreaCodeCache() {
+  if (nanpAreaCodeCache) return nanpAreaCodeCache;
+  nanpAreaCodeCache = new Map();
+  try {
+    const token = getAccessToken();
+    const rows = await sbGet('/rest/v1/nanp_area_codes', { select: 'area_code,region,description', limit: 2000 }, token);
+    if (Array.isArray(rows)) {
+      rows.forEach(r => {
+        const ac = String(r.area_code || '').trim();
+        if (!ac) return;
+        nanpAreaCodeCache.set(ac, { region: r.region || '', description: r.description || '' });
+      });
+    }
+  } catch (e) {
+    // ignore: table may not exist yet
+  }
+  return nanpAreaCodeCache;
+}
+async function areaCodeLabelForNumber(num) {
   const raw = String(num || '').trim();
   const d = raw.replace(/\D/g, '');
   // NANP: +1 NXX...
@@ -1117,7 +1136,10 @@ function areaCodeLabelForNumber(num) {
     const ten = d.length === 10 ? d : (d.length === 11 && d.startsWith('1') ? d.slice(1) : '');
     const ac = ten ? ten.slice(0, 3) : '';
     if (!ac) return 'USA/Canada';
-    const loc = NANP_AREA_CODE_LOCATIONS[ac];
+    // Prefer DB mapping if available, fall back to the small built-in map.
+    const cache = await loadNanpAreaCodeCache();
+    const dbRow = cache && cache.get(ac);
+    const loc = (dbRow && (dbRow.description || dbRow.region)) ? (dbRow.description || dbRow.region) : NANP_AREA_CODE_LOCATIONS[ac];
     return loc ? `+1 ${ac} — ${loc}` : `+1 ${ac} — USA/Canada`;
   }
   // Generic fallback
@@ -1871,7 +1893,7 @@ async function populateInsightsPanel(idx) {
   if (!c?.id) return;
   document.getElementById('ins-nickname').value = c.name || '';
   const acEl = document.getElementById('ins-area-code');
-  if (acEl) acEl.textContent = areaCodeLabelForNumber(c.num);
+  if (acEl) { acEl.textContent = 'Loading…'; areaCodeLabelForNumber(c.num).then(v => { if (acEl) acEl.textContent = v || '—'; }); }
   const row = await fetchContactInsightsRow(c.id);
   document.getElementById('ins-birthday').value = row?.birthday || '';
   document.getElementById('ins-location').value = row?.location_label || '';
